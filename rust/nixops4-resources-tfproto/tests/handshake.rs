@@ -51,3 +51,52 @@ async fn schema_string_attribute_roundtrip() {
     // wire is a JSON string, quotes included.
     assert_eq!(attr.cty_type, "\"string\"");
 }
+
+#[tokio::test]
+async fn create_string_via_plan_apply() {
+    let Some(path) = fixture_path() else {
+        eprintln!("skipping: NIXOPS4_TFPROTO_FIXTURE not set");
+        return;
+    };
+    let client = ProviderClient::launch(&path).await.expect("launch fixture");
+
+    // The fixture takes no provider configuration; a null cty value
+    // is the smallest legal one to send.
+    client
+        .configure_provider(b"null".to_vec())
+        .await
+        .expect("configure fixture");
+
+    // A create is a Plan followed by an Apply. `prior_state` is a
+    // cty null (no prior resource). `proposed_new_state` and `config`
+    // both encode the user-requested configuration in go-cty JSON.
+    let proposed = br#"{"value":"hello"}"#.to_vec();
+    let plan = client
+        .plan_resource_change(
+            "fx_string",
+            b"null".to_vec(),
+            proposed.clone(),
+            proposed.clone(),
+        )
+        .await
+        .expect("plan create");
+    let planned_state = plan.planned_state.expect("fixture returns planned state");
+
+    let apply = client
+        .apply_resource_change(
+            "fx_string",
+            b"null".to_vec(),
+            planned_state,
+            plan.planned_private,
+            proposed,
+        )
+        .await
+        .expect("apply create");
+    let new_state = apply.new_state.expect("fixture returns new state");
+
+    client.shutdown().await.expect("clean shutdown");
+
+    // The fixture echoes proposed → planned → new. The JSON payload
+    // survives the round trip byte-for-byte.
+    assert_eq!(new_state.json, br#"{"value":"hello"}"#);
+}

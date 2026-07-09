@@ -97,13 +97,17 @@ impl ProviderClient {
         let _ = self.process.wait().await;
         Ok(())
     }
+    fn provider(&self) -> tfplugin6::provider_client::ProviderClient<Channel> {
+        tfplugin6::provider_client::ProviderClient::new(self.channel.clone())
+    }
+
     /// Call `GetProviderSchema` and return the raw response.
     ///
     /// Any provider-side [`tfplugin6::Diagnostic`] with error severity in
     /// the response is surfaced as an `Err` here.
     pub async fn get_provider_schema(&self) -> Result<tfplugin6::get_provider_schema::Response> {
-        let mut client = tfplugin6::provider_client::ProviderClient::new(self.channel.clone());
-        let response = client
+        let response = self
+            .provider()
             .get_provider_schema(tonic::Request::new(
                 tfplugin6::get_provider_schema::Request {},
             ))
@@ -112,6 +116,95 @@ impl ProviderClient {
             .into_inner();
         check_diagnostics(&response.diagnostics).context("provider returned diagnostics")?;
         Ok(response)
+    }
+
+    /// Call `ConfigureProvider` with the given raw configuration bytes.
+    /// A provider that takes no configuration accepts a `null` go-cty JSON
+    /// (`b"null"`) here.
+    pub async fn configure_provider(&self, config_json: Vec<u8>) -> Result<()> {
+        let req = tfplugin6::configure_provider::Request {
+            terraform_version: "0.0.0-nixops4-tfproto".to_string(),
+            config: Some(tfplugin6::DynamicValue {
+                msgpack: Vec::new(),
+                json: config_json,
+            }),
+            client_capabilities: None,
+        };
+        let response = self
+            .provider()
+            .configure_provider(tonic::Request::new(req))
+            .await
+            .context("calling ConfigureProvider")?
+            .into_inner();
+        check_diagnostics(&response.diagnostics).context("provider returned diagnostics")
+    }
+
+    /// Call `PlanResourceChange` and return the raw response.
+    ///
+    /// `proposed_new_state_json` is the go-cty JSON encoding of what the
+    /// caller wants the resource to become. For a create operation,
+    /// `prior_state_json` should be `b"null"`.
+    pub async fn plan_resource_change(
+        &self,
+        type_name: &str,
+        prior_state_json: Vec<u8>,
+        proposed_new_state_json: Vec<u8>,
+        config_json: Vec<u8>,
+    ) -> Result<tfplugin6::plan_resource_change::Response> {
+        let req = tfplugin6::plan_resource_change::Request {
+            type_name: type_name.to_string(),
+            prior_state: Some(dv(prior_state_json)),
+            proposed_new_state: Some(dv(proposed_new_state_json)),
+            config: Some(dv(config_json)),
+            prior_private: Vec::new(),
+            provider_meta: None,
+            client_capabilities: None,
+            prior_identity: None,
+        };
+        let response = self
+            .provider()
+            .plan_resource_change(tonic::Request::new(req))
+            .await
+            .context("calling PlanResourceChange")?
+            .into_inner();
+        check_diagnostics(&response.diagnostics).context("provider returned diagnostics")?;
+        Ok(response)
+    }
+
+    /// Call `ApplyResourceChange` and return the raw response.
+    pub async fn apply_resource_change(
+        &self,
+        type_name: &str,
+        prior_state_json: Vec<u8>,
+        planned_state: tfplugin6::DynamicValue,
+        planned_private: Vec<u8>,
+        config_json: Vec<u8>,
+    ) -> Result<tfplugin6::apply_resource_change::Response> {
+        let req = tfplugin6::apply_resource_change::Request {
+            type_name: type_name.to_string(),
+            prior_state: Some(dv(prior_state_json)),
+            planned_state: Some(planned_state),
+            config: Some(dv(config_json)),
+            planned_private,
+            provider_meta: None,
+            planned_identity: None,
+        };
+        let response = self
+            .provider()
+            .apply_resource_change(tonic::Request::new(req))
+            .await
+            .context("calling ApplyResourceChange")?
+            .into_inner();
+        check_diagnostics(&response.diagnostics).context("provider returned diagnostics")?;
+        Ok(response)
+    }
+}
+
+/// Build a JSON-encoded `DynamicValue` from raw go-cty JSON bytes.
+fn dv(json: Vec<u8>) -> tfplugin6::DynamicValue {
+    tfplugin6::DynamicValue {
+        msgpack: Vec::new(),
+        json,
     }
 }
 

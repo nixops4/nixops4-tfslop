@@ -70,10 +70,11 @@ func (p *fixtureProvider) ValidateProviderConfig(context.Context, *tfprotov6.Val
 	}, nil
 }
 
+// ConfigureProvider is a no-op: the fixture takes no provider-level
+// configuration. It must succeed so real clients can proceed to
+// per-resource RPCs.
 func (p *fixtureProvider) ConfigureProvider(context.Context, *tfprotov6.ConfigureProviderRequest) (*tfprotov6.ConfigureProviderResponse, error) {
-	return &tfprotov6.ConfigureProviderResponse{
-		Diagnostics: []*tfprotov6.Diagnostic{notImplemented("ConfigureProvider")},
-	}, nil
+	return &tfprotov6.ConfigureProviderResponse{}, nil
 }
 
 // StopProvider must succeed even when other methods return diagnostics:
@@ -132,10 +133,10 @@ func (p *fixtureProvider) DeleteState(context.Context, *tfprotov6.DeleteStateReq
 
 // --- ResourceServer ---
 
+// ValidateResourceConfig always succeeds: any input the tfplugin
+// framework already decoded to a DynamicValue is acceptable.
 func (p *fixtureProvider) ValidateResourceConfig(context.Context, *tfprotov6.ValidateResourceConfigRequest) (*tfprotov6.ValidateResourceConfigResponse, error) {
-	return &tfprotov6.ValidateResourceConfigResponse{
-		Diagnostics: []*tfprotov6.Diagnostic{notImplemented("ValidateResourceConfig")},
-	}, nil
+	return &tfprotov6.ValidateResourceConfigResponse{}, nil
 }
 
 func (p *fixtureProvider) UpgradeResourceState(context.Context, *tfprotov6.UpgradeResourceStateRequest) (*tfprotov6.UpgradeResourceStateResponse, error) {
@@ -150,15 +151,20 @@ func (p *fixtureProvider) ReadResource(context.Context, *tfprotov6.ReadResourceR
 	}, nil
 }
 
-func (p *fixtureProvider) PlanResourceChange(context.Context, *tfprotov6.PlanResourceChangeRequest) (*tfprotov6.PlanResourceChangeResponse, error) {
+// PlanResourceChange echoes the proposed state as the planned state.
+// A real provider would substitute defaults for unknown fields and
+// mark computed attributes; our fixture has neither.
+func (p *fixtureProvider) PlanResourceChange(_ context.Context, req *tfprotov6.PlanResourceChangeRequest) (*tfprotov6.PlanResourceChangeResponse, error) {
 	return &tfprotov6.PlanResourceChangeResponse{
-		Diagnostics: []*tfprotov6.Diagnostic{notImplemented("PlanResourceChange")},
+		PlannedState: req.ProposedNewState,
 	}, nil
 }
 
-func (p *fixtureProvider) ApplyResourceChange(context.Context, *tfprotov6.ApplyResourceChangeRequest) (*tfprotov6.ApplyResourceChangeResponse, error) {
+// ApplyResourceChange echoes the planned state as the new state.
+// This is the minimum a create/update needs to do.
+func (p *fixtureProvider) ApplyResourceChange(_ context.Context, req *tfprotov6.ApplyResourceChangeRequest) (*tfprotov6.ApplyResourceChangeResponse, error) {
 	return &tfprotov6.ApplyResourceChangeResponse{
-		Diagnostics: []*tfprotov6.Diagnostic{notImplemented("ApplyResourceChange")},
+		NewState: req.PlannedState,
 	}, nil
 }
 
