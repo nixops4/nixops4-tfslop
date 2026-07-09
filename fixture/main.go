@@ -101,6 +101,110 @@ func (p *fixtureProvider) GetProviderSchema(context.Context, *tfprotov6.GetProvi
 					},
 				},
 			},
+			// Single-nested block: at most one `settings { … }`.
+			"fx_single_block": {
+				Version: 0,
+				Block: &tfprotov6.SchemaBlock{
+					BlockTypes: []*tfprotov6.SchemaNestedBlock{
+						{
+							TypeName: "settings",
+							Nesting:  tfprotov6.SchemaNestedBlockNestingModeSingle,
+							Block: &tfprotov6.SchemaBlock{
+								Attributes: []*tfprotov6.SchemaAttribute{
+									{
+										Name:            "endpoint",
+										Type:            tftypes.String,
+										Required:        true,
+										Description:     "Where to talk to.",
+										DescriptionKind: tfprotov6.StringKindPlain,
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+			// Single-nested block with an optional inner attribute.
+			// Exercises the `optional=true, required=false` filter branch
+			// inside a nested block.
+			"fx_optional_block_attr": {
+				Version: 0,
+				Block: &tfprotov6.SchemaBlock{
+					BlockTypes: []*tfprotov6.SchemaNestedBlock{
+						{
+							TypeName: "settings",
+							Nesting:  tfprotov6.SchemaNestedBlockNestingModeSingle,
+							Block: &tfprotov6.SchemaBlock{
+								Attributes: []*tfprotov6.SchemaAttribute{
+									{
+										Name:            "endpoint",
+										Type:            tftypes.String,
+										Optional:        true,
+										Description:     "Where to talk to (optional).",
+										DescriptionKind: tfprotov6.StringKindPlain,
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+			// Block containing a block: exercises the recursion in the
+			// Nix translation. `outer.inner.value` should end up as a
+			// `types.str` two submodules deep.
+			"fx_nested_blocks": {
+				Version: 0,
+				Block: &tfprotov6.SchemaBlock{
+					BlockTypes: []*tfprotov6.SchemaNestedBlock{
+						{
+							TypeName: "outer",
+							Nesting:  tfprotov6.SchemaNestedBlockNestingModeSingle,
+							Block: &tfprotov6.SchemaBlock{
+								BlockTypes: []*tfprotov6.SchemaNestedBlock{
+									{
+										TypeName: "inner",
+										Nesting:  tfprotov6.SchemaNestedBlockNestingModeSingle,
+										Block: &tfprotov6.SchemaBlock{
+											Attributes: []*tfprotov6.SchemaAttribute{
+												{
+													Name:            "value",
+													Type:            tftypes.String,
+													Required:        true,
+													Description:     "Innermost required string.",
+													DescriptionKind: tfprotov6.StringKindPlain,
+												},
+											},
+										},
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+			// List-nested block: zero or more `rule { … }`.
+			"fx_list_block": {
+				Version: 0,
+				Block: &tfprotov6.SchemaBlock{
+					BlockTypes: []*tfprotov6.SchemaNestedBlock{
+						{
+							TypeName: "rule",
+							Nesting:  tfprotov6.SchemaNestedBlockNestingModeList,
+							Block: &tfprotov6.SchemaBlock{
+								Attributes: []*tfprotov6.SchemaAttribute{
+									{
+										Name:            "name",
+										Type:            tftypes.String,
+										Required:        true,
+										Description:     "Rule name.",
+										DescriptionKind: tfprotov6.StringKindPlain,
+									},
+								},
+							},
+						},
+					},
+				},
+			},
 		},
 		DataSourceSchemas: map[string]*tfprotov6.Schema{},
 	}, nil

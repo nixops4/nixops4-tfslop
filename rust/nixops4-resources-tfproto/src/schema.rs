@@ -36,6 +36,29 @@ pub struct ResourceSchema {
 #[derive(Debug, Serialize)]
 pub struct Block {
     pub attributes: BTreeMap<String, Attribute>,
+    /// Legacy-style nested blocks (as opposed to cty nested attributes).
+    /// Empty for most modern schemas but present in many real providers.
+    #[serde(skip_serializing_if = "BTreeMap::is_empty")]
+    pub block_types: BTreeMap<String, BlockType>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct BlockType {
+    pub nesting: NestingMode,
+    pub block: Block,
+}
+
+/// How multiple instances of a block relate in the config. `Single`
+/// and `List` are the common ones; the others are supported by
+/// tfplugin but not by this adapter yet.
+#[derive(Debug, Serialize, PartialEq, Eq)]
+pub enum NestingMode {
+    Single,
+    List,
+    /// Any nesting mode we don't handle yet — the raw variant name from
+    /// the proto is preserved so the Nix side can surface a specific
+    /// error rather than a generic "unknown".
+    Unsupported(String),
 }
 
 #[derive(Debug, Serialize)]
@@ -88,6 +111,7 @@ impl Block {
     fn empty() -> Self {
         Block {
             attributes: BTreeMap::new(),
+            block_types: BTreeMap::new(),
         }
     }
 
@@ -100,7 +124,41 @@ impl Block {
                 Attribute::from_wire(type_name, a).map(|attr| (name, attr))
             })
             .collect::<Result<_>>()?;
-        Ok(Block { attributes })
+        let block_types = block
+            .block_types
+            .into_iter()
+            .map(|nb| {
+                let name = nb.type_name.clone();
+                BlockType::from_wire(type_name, nb).map(|bt| (name, bt))
+            })
+            .collect::<Result<_>>()?;
+        Ok(Block {
+            attributes,
+            block_types,
+        })
+    }
+}
+
+impl BlockType {
+    fn from_wire(parent: &str, nb: tfplugin6::schema::NestedBlock) -> Result<Self> {
+        let nesting = NestingMode::from_wire(nb.nesting);
+        let inner_block = nb
+            .block
+            .with_context(|| format!("block {}.{} has no inner block", parent, nb.type_name))?;
+        let block = Block::from_wire(&format!("{}.{}", parent, nb.type_name), inner_block)?;
+        Ok(BlockType { nesting, block })
+    }
+}
+
+impl NestingMode {
+    fn from_wire(nesting: i32) -> Self {
+        use tfplugin6::schema::nested_block::NestingMode as W;
+        match W::try_from(nesting) {
+            Ok(W::Single) => NestingMode::Single,
+            Ok(W::List) => NestingMode::List,
+            Ok(other) => NestingMode::Unsupported(format!("{:?}", other)),
+            Err(_) => NestingMode::Unsupported(format!("unknown({})", nesting)),
+        }
     }
 }
 

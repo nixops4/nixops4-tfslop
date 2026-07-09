@@ -62,6 +62,35 @@ let
         readOnly = true;
       }
     ) (lib.filterAttrs (_: attr: attr.computed or false) attrs);
+
+  # Nested blocks recurse into their own inner block; the inner block
+  # may itself have attributes and further nested blocks.
+  convertInputBlockTypes =
+    blockTypes:
+    lib.mapAttrs (
+      name: bt:
+      let
+        inner = types.submodule {
+          options = convertBlockInputs bt.block;
+        };
+      in
+      mkOption {
+        type =
+          if bt.nesting == "Single" then
+            types.nullOr inner
+          else if bt.nesting == "List" then
+            types.listOf inner
+          else
+            throw "tfCommonSchemaToModule: unsupported block nesting ${builtins.toJSON bt.nesting}";
+        default = if bt.nesting == "Single" then null else [ ];
+        description = "Nested block ${name}";
+      }
+    ) blockTypes;
+
+  convertBlockInputs =
+    block:
+    (convertInputAttributes (block.attributes or { }))
+    // (convertInputBlockTypes (block.block_types or { }));
 in
 rec {
   /**
@@ -100,10 +129,12 @@ rec {
           else
             "Terraform resource ${typeName}";
         inputs = {
-          options = convertInputAttributes value.block.attributes;
+          options = convertBlockInputs value.block;
         };
+        # Nested blocks are always user-supplied config, never computed,
+        # so outputs derive from the top-level attributes only.
         outputs = {
-          options = convertOutputAttributes value.block.attributes;
+          options = convertOutputAttributes (value.block.attributes or { });
         };
       }) schema.resource_schemas;
     };
