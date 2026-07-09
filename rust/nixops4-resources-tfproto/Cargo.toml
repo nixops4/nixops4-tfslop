@@ -1,0 +1,10 @@
+[package]
+name = "nixops4-resources-tfproto"
+description = "NixOps4 adapter for the tfplugin gRPC protocol"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "nixops4-resources-tfproto"
+path = "src/main.rs"

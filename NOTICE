@@ -1,0 +1,18 @@
+nixops4-tfproto — third-party notices
+=====================================
+
+Vendored protobuf definitions
+-----------------------------
+
+The files under `vendor/proto/` are copied from the HashiCorp Terraform
+repository and licensed under the Mozilla Public License 2.0.
+
+- Source: https://github.com/hashicorp/terraform
+- License: MPL-2.0 — https://www.mozilla.org/en-US/MPL/2.0/
+- Copyright (c) HashiCorp, Inc.
+
+The MPL-2.0 requires that modifications to these files remain under
+MPL-2.0. This repository does not modify them; they are used as-is to
+generate gRPC bindings.
+
+The rest of this repository is licensed under LGPL-2.1 (see LICENSE).
