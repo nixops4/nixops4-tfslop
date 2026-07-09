@@ -101,12 +101,12 @@ impl ProviderClient {
     ///
     /// Any provider-side [`tfplugin6::Diagnostic`] with error severity in
     /// the response is surfaced as an `Err` here.
-    pub async fn get_provider_schema(
-        &self,
-    ) -> Result<tfplugin6::get_provider_schema::Response> {
+    pub async fn get_provider_schema(&self) -> Result<tfplugin6::get_provider_schema::Response> {
         let mut client = tfplugin6::provider_client::ProviderClient::new(self.channel.clone());
         let response = client
-            .get_provider_schema(tonic::Request::new(tfplugin6::get_provider_schema::Request {}))
+            .get_provider_schema(tonic::Request::new(
+                tfplugin6::get_provider_schema::Request {},
+            ))
             .await
             .context("calling GetProviderSchema")?
             .into_inner();
@@ -133,4 +133,3 @@ fn check_diagnostics(diagnostics: &[tfplugin6::Diagnostic]) -> Result<()> {
     }
     Ok(())
 }
-

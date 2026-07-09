@@ -18,9 +18,11 @@
       # or, slower:
       #   nix build .#checks.<system>.nix-unit
       nix-unit.tests.lib = import ../nix/tests/lib.nix {
-        inherit (pkgs) lib;
+        inherit (pkgs) lib runCommand;
         inherit self;
         nixops4 = inputs.nixops4;
+        adapter = config.packages.default;
+        fixture = config.packages.fixture;
       };
       nix-unit.inputs = {
         inherit (inputs)
@@ -96,4 +98,5 @@
       "aarch64-darwin"
     ];
   };
+
 }

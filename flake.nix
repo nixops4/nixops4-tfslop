@@ -22,6 +22,7 @@
         imports = [
           inputs.nix-cargo-integration.flakeModule
           inputs.flake-parts.flakeModules.partitions
+          inputs.flake-parts.flakeModules.touchup
           ./rust/nci.nix
         ];
         systems = [
@@ -48,6 +49,25 @@
         partitions.dev.module = {
           imports = [ ./dev/flake-module.nix ];
         };
+
+        # nix-unit's auto-generated `checks.nix-unit` derivation has
+        # no `nix` binary on PATH, which our IFD-using tests need to
+        # build the fixture schema. Its flake module doesn't expose
+        # nativeBuildInputs, so touch up the derivation after the fact.
+        # The touchup lives here (not in the dev partition) because
+        # partitions promotes `flake.checks` untouched — touchup only
+        # applies at the flake that produces `processedFlake`.
+        touchup.attr.checks.any =
+          { attrName, ... }:
+          {
+            attr.nix-unit.finish =
+              drv:
+              drv.overrideAttrs (old: {
+                nativeBuildInputs = old.nativeBuildInputs ++ [
+                  inputs.nixpkgs.legacyPackages.${attrName}.nix
+                ];
+              });
+          };
       }
     );
 }

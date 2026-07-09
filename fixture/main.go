@@ -13,6 +13,7 @@ import (
 
 	"github.com/hashicorp/terraform-plugin-go/tfprotov6"
 	"github.com/hashicorp/terraform-plugin-go/tfprotov6/tf6server"
+	"github.com/hashicorp/terraform-plugin-go/tftypes"
 )
 
 func main() {
@@ -43,7 +44,22 @@ func (p *fixtureProvider) GetMetadata(context.Context, *tfprotov6.GetMetadataReq
 
 func (p *fixtureProvider) GetProviderSchema(context.Context, *tfprotov6.GetProviderSchemaRequest) (*tfprotov6.GetProviderSchemaResponse, error) {
 	return &tfprotov6.GetProviderSchemaResponse{
-		ResourceSchemas:   map[string]*tfprotov6.Schema{},
+		ResourceSchemas: map[string]*tfprotov6.Schema{
+			"fx_string": {
+				Version: 0,
+				Block: &tfprotov6.SchemaBlock{
+					Attributes: []*tfprotov6.SchemaAttribute{
+						{
+							Name:            "value",
+							Type:            tftypes.String,
+							Required:        true,
+							Description:     "A required string. Echoed back on create.",
+							DescriptionKind: tfprotov6.StringKindPlain,
+						},
+					},
+				},
+			},
+		},
 		DataSourceSchemas: map[string]*tfprotov6.Schema{},
 	}, nil
 }

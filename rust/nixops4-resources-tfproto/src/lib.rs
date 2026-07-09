@@ -8,4 +8,5 @@ pub mod tfplugin6 {
     tonic::include_proto!("tfplugin6");
 }
 
+pub mod schema;
 pub mod tf_provider_client;
