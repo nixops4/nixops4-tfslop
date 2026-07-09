@@ -11,6 +11,28 @@ The name is a coinage — read it as "tfplugin protocol adapter", not "Terraform
 CLI integration". Both Terraform and OpenTofu providers speak the same gRPC
 protocol; this adapter targets that protocol directly.
 
+## Refresh is separate from apply
+
+Terraform's canonical apply cycle is **Refresh → Plan → Apply**: every apply
+starts by calling `ReadResource` on each resource in state to reconcile
+against reality, then computes a diff, then applies it. Refresh is the slow
+part.
+
+NixOps4 is IaC-first: state is authoritative, and `nixops4 apply` does not
+refresh. This adapter follows that discipline — it drives providers through
+`ConfigureProvider → PlanResourceChange → ApplyResourceChange` on create and
+update, and skips `ReadResource` entirely. Applies stay fast.
+
+Drift reconciliation belongs in a separate operation, ideally event-driven:
+a restart or reboot triggers a refresh (via a `nixops4 run`-mediated
+runtime, a monitoring loop, or a boot-time hook), not every deployment.
+
+Terraform users can approximate the same split with its own flags:
+`terraform apply -refresh=false` matches what this adapter does by default,
+and `terraform plan -refresh-only` matches the separate reconciliation
+operation. The difference is that here it's the default posture rather than
+opt-out — deployment is a distinct workflow from drift monitoring.
+
 ## What this repo contains
 
 - `rust/nixops4-resources-tfproto/` — the adapter binary (Rust). Speaks the
