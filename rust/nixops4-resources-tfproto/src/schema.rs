@@ -45,7 +45,22 @@ pub struct Block {
 #[derive(Debug, Serialize)]
 pub struct BlockType {
     pub nesting: NestingMode,
+    /// `min_items = 0` marks a block whose presence is optional.
+    /// `min_items >= 1` on a Single-nesting block turns it into a
+    /// required block; on a List-nesting block it requires that many
+    /// entries.
+    #[serde(skip_serializing_if = "is_zero_i64")]
+    pub min_items: i64,
+    /// `max_items = 0` means unbounded. Otherwise, an upper cap on the
+    /// number of block instances. Forwarded verbatim; the Nix side
+    /// does not yet enforce it.
+    #[serde(skip_serializing_if = "is_zero_i64")]
+    pub max_items: i64,
     pub block: Block,
+}
+
+fn is_zero_i64(n: &i64) -> bool {
+    *n == 0
 }
 
 /// How multiple instances of a block relate in the config. `Single`
@@ -146,7 +161,12 @@ impl BlockType {
             .block
             .with_context(|| format!("block {}.{} has no inner block", parent, nb.type_name))?;
         let block = Block::from_wire(&format!("{}.{}", parent, nb.type_name), inner_block)?;
-        Ok(BlockType { nesting, block })
+        Ok(BlockType {
+            nesting,
+            min_items: nb.min_items,
+            max_items: nb.max_items,
+            block,
+        })
     }
 }
 

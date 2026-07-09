@@ -71,6 +71,20 @@ let
     (lib.evalModules {
       modules = [ cfg.resourceTypes.fx_nested_blocks.inputs ];
     }).options;
+  fxRequiredSingleBlockInputOptions =
+    (lib.evalModules {
+      modules = [ cfg.resourceTypes.fx_required_single_block.inputs ];
+    }).options;
+
+  # Materialisation of a MinItems=1 Single block: the option must
+  # accept a supplied value and expose no default.
+  materialisedRequiredSingle =
+    (lib.evalModules {
+      modules = [
+        cfg.resourceTypes.fx_required_single_block.inputs
+        { settings.endpoint = "https://example.invalid"; }
+      ];
+    }).config;
 
   # Materialisation checks: build a real config through the module
   # system to prove the option types not only *exist* with the right
@@ -280,5 +294,24 @@ in
   "test recursive block value round-trips through option" = {
     expr = materialisedNested.outer.inner.value;
     expected = "deep";
+  };
+
+  # MinItems=1 on a Single block: the block itself is not nullable and
+  # has no default, so the user must supply it. The submodule shape
+  # inside is otherwise identical to the optional case.
+
+  "test required single block is not nullOr" = {
+    expr = fxRequiredSingleBlockInputOptions.settings.type.name;
+    expected = "submodule";
+  };
+
+  "test required single block has no default" = {
+    expr = fxRequiredSingleBlockInputOptions.settings ? default;
+    expected = false;
+  };
+
+  "test required single block value round-trips through option" = {
+    expr = materialisedRequiredSingle.settings.endpoint;
+    expected = "https://example.invalid";
   };
 }

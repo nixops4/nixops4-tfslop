@@ -124,6 +124,31 @@ func (p *fixtureProvider) GetProviderSchema(context.Context, *tfprotov6.GetProvi
 					},
 				},
 			},
+			// Required Single-nested block: MinItems=1 means the user
+			// must supply the block; it does not default to null.
+			"fx_required_single_block": {
+				Version: 0,
+				Block: &tfprotov6.SchemaBlock{
+					BlockTypes: []*tfprotov6.SchemaNestedBlock{
+						{
+							TypeName: "settings",
+							Nesting:  tfprotov6.SchemaNestedBlockNestingModeSingle,
+							MinItems: 1,
+							Block: &tfprotov6.SchemaBlock{
+								Attributes: []*tfprotov6.SchemaAttribute{
+									{
+										Name:            "endpoint",
+										Type:            tftypes.String,
+										Required:        true,
+										Description:     "Where to talk to.",
+										DescriptionKind: tfprotov6.StringKindPlain,
+									},
+								},
+							},
+						},
+					},
+				},
+			},
 			// Single-nested block with an optional inner attribute.
 			// Exercises the `optional=true, required=false` filter branch
 			// inside a nested block.

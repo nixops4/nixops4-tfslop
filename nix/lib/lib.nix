@@ -65,6 +65,19 @@ let
 
   # Nested blocks recurse into their own inner block; the inner block
   # may itself have attributes and further nested blocks.
+  #
+  # `min_items = 0` (the default, omitted on the wire) marks the block
+  # as optional: Single becomes `nullOr submodule` with `default null`,
+  # List becomes `listOf submodule` with `default [ ]`. `min_items >= 1`
+  # drops the default so the user must supply a value — module-system
+  # validation surfaces a missing value as a "used but not defined"
+  # error. We do not enforce list length; that becomes a runtime
+  # diagnostic when tfplugin's Plan rejects the value.
+  #
+  # `max_items` is deliberately unused for now: tfplugin providers
+  # commonly set it as a hint (e.g. `max_items = 1` on a Single-like
+  # List), not a hard invariant. If we grow a use case we can add a
+  # `check`/`apply` layer here.
   convertInputBlockTypes =
     blockTypes:
     lib.mapAttrs (
@@ -73,18 +86,24 @@ let
         inner = types.submodule {
           options = convertBlockInputs bt.block;
         };
+        minItems = bt.min_items or 0;
+        required = minItems >= 1;
       in
-      mkOption {
-        type =
-          if bt.nesting == "Single" then
-            types.nullOr inner
-          else if bt.nesting == "List" then
-            types.listOf inner
-          else
-            throw "tfCommonSchemaToModule: unsupported block nesting ${builtins.toJSON bt.nesting}";
-        default = if bt.nesting == "Single" then null else [ ];
-        description = "Nested block ${name}";
-      }
+      mkOption (
+        {
+          type =
+            if bt.nesting == "Single" then
+              (if required then inner else types.nullOr inner)
+            else if bt.nesting == "List" then
+              types.listOf inner
+            else
+              throw "tfCommonSchemaToModule: unsupported block nesting ${builtins.toJSON bt.nesting}";
+          description = "Nested block ${name}";
+        }
+        // lib.optionalAttrs (!required) {
+          default = if bt.nesting == "Single" then null else [ ];
+        }
+      )
     ) blockTypes;
 
   convertBlockInputs =
