@@ -13,14 +13,21 @@ let
   # <https://github.com/zclconf/go-cty/blob/main/cty/json/marshal.go>
   # (`MarshalType` / `UnmarshalType`).
   #
+  # Parse the wire JSON once, then dispatch structurally on the parsed
+  # value — otherwise the primitive arms compare against string
+  # literals like `"\"string\""` and composite arms would have to
+  # branch on prefix substrings, which is ugly.
+  #
   # A hard error, rather than a fallback to `types.raw`, forces us to
   # notice a new attribute shape the first time it appears instead of
   # silently mishandling every resource that uses it.
-  ctyTypeToOptionType =
-    ctyType:
-    if ctyType == "\"string\"" then
+  ctyTypeToOptionType = ctyType: ctyParsedToOptionType (builtins.fromJSON ctyType);
+
+  ctyParsedToOptionType =
+    parsed:
+    if parsed == "string" then
       types.str
-    else if ctyType == "\"bool\"" then
+    else if parsed == "bool" then
       types.bool
     # cty `number` is arbitrary-precision decimal. `types.int` is the
     # pragmatic mapping — most Terraform attributes marked `number` are
@@ -28,10 +35,12 @@ let
     # provider that legitimately produces fractional numbers, split
     # into `types.int` vs `types.float` based on the schema hint or
     # widen to a more general type.
-    else if ctyType == "\"number\"" then
+    else if parsed == "number" then
       types.int
+    else if builtins.isList parsed && builtins.length parsed == 2 && builtins.head parsed == "list" then
+      types.listOf (ctyParsedToOptionType (builtins.elemAt parsed 1))
     else
-      throw "tfCommonSchemaToModule: unsupported cty type ${builtins.toJSON ctyType}";
+      throw "tfCommonSchemaToModule: unsupported cty type ${builtins.toJSON parsed}";
 
   convertInputAttributes =
     attrs:

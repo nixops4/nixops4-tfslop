@@ -87,6 +87,20 @@ func (p *fixtureProvider) GetProviderSchema(context.Context, *tfprotov6.GetProvi
 					},
 				},
 			},
+			"fx_list_string": {
+				Version: 0,
+				Block: &tfprotov6.SchemaBlock{
+					Attributes: []*tfprotov6.SchemaAttribute{
+						{
+							Name:            "value",
+							Type:            tftypes.List{ElementType: tftypes.String},
+							Required:        true,
+							Description:     "A required list of strings. Echoed back on create.",
+							DescriptionKind: tfprotov6.StringKindPlain,
+						},
+					},
+				},
+			},
 		},
 		DataSourceSchemas: map[string]*tfprotov6.Schema{},
 	}, nil

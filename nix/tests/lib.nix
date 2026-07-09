@@ -52,6 +52,10 @@ let
     (lib.evalModules {
       modules = [ cfg.resourceTypes.fx_number.inputs ];
     }).options;
+  fxListStringInputOptions =
+    (lib.evalModules {
+      modules = [ cfg.resourceTypes.fx_list_string.inputs ];
+    }).options;
 
 in
 {
@@ -107,5 +111,20 @@ in
   "test number attribute description comes from schema" = {
     expr = fxNumberInputOptions.value.description;
     expected = "A required number. Echoed back on create.";
+  };
+
+  "test list-of-string attribute becomes types.listOf types.str" = {
+    expr = fxListStringInputOptions.value.type.name;
+    expected = "listOf";
+  };
+
+  "test list-of-string element type is types.str" = {
+    expr = fxListStringInputOptions.value.type.functor.payload.elemType.name;
+    expected = "str";
+  };
+
+  "test list-of-string description comes from schema" = {
+    expr = fxListStringInputOptions.value.description;
+    expected = "A required list of strings. Echoed back on create.";
   };
 }
