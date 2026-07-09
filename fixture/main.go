@@ -73,6 +73,20 @@ func (p *fixtureProvider) GetProviderSchema(context.Context, *tfprotov6.GetProvi
 					},
 				},
 			},
+			"fx_number": {
+				Version: 0,
+				Block: &tfprotov6.SchemaBlock{
+					Attributes: []*tfprotov6.SchemaAttribute{
+						{
+							Name:            "value",
+							Type:            tftypes.Number,
+							Required:        true,
+							Description:     "A required number. Echoed back on create.",
+							DescriptionKind: tfprotov6.StringKindPlain,
+						},
+					},
+				},
+			},
 		},
 		DataSourceSchemas: map[string]*tfprotov6.Schema{},
 	}, nil

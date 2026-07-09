@@ -48,6 +48,10 @@ let
     (lib.evalModules {
       modules = [ cfg.resourceTypes.fx_bool.inputs ];
     }).options;
+  fxNumberInputOptions =
+    (lib.evalModules {
+      modules = [ cfg.resourceTypes.fx_number.inputs ];
+    }).options;
 
 in
 {
@@ -93,5 +97,15 @@ in
   "test bool attribute description comes from schema" = {
     expr = fxBoolInputOptions.value.description;
     expected = "A required bool. Echoed back on create.";
+  };
+
+  "test number attribute becomes types.int" = {
+    expr = fxNumberInputOptions.value.type.name;
+    expected = "int";
+  };
+
+  "test number attribute description comes from schema" = {
+    expr = fxNumberInputOptions.value.description;
+    expected = "A required number. Echoed back on create.";
   };
 }

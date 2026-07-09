@@ -22,6 +22,14 @@ let
       types.str
     else if ctyType == "\"bool\"" then
       types.bool
+    # cty `number` is arbitrary-precision decimal. `types.int` is the
+    # pragmatic mapping — most Terraform attributes marked `number` are
+    # integers in practice (counts, ports, timeouts). If we ever hit a
+    # provider that legitimately produces fractional numbers, split
+    # into `types.int` vs `types.float` based on the schema hint or
+    # widen to a more general type.
+    else if ctyType == "\"number\"" then
+      types.int
     else
       throw "tfCommonSchemaToModule: unsupported cty type ${builtins.toJSON ctyType}";
 
