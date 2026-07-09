@@ -174,6 +174,39 @@ func (p *fixtureProvider) GetProviderSchema(context.Context, *tfprotov6.GetProvi
 					},
 				},
 			},
+			// Single-nested block with a provider-computed inner
+			// attribute. Exercises output-side projection through a
+			// block: `outputs.settings.token` must exist while
+			// `outputs.token` (flat) must not.
+			"fx_computed_block_attr": {
+				Version: 0,
+				Block: &tfprotov6.SchemaBlock{
+					BlockTypes: []*tfprotov6.SchemaNestedBlock{
+						{
+							TypeName: "settings",
+							Nesting:  tfprotov6.SchemaNestedBlockNestingModeSingle,
+							Block: &tfprotov6.SchemaBlock{
+								Attributes: []*tfprotov6.SchemaAttribute{
+									{
+										Name:            "endpoint",
+										Type:            tftypes.String,
+										Required:        true,
+										Description:     "Where to talk to.",
+										DescriptionKind: tfprotov6.StringKindPlain,
+									},
+									{
+										Name:            "token",
+										Type:            tftypes.String,
+										Computed:        true,
+										Description:     "Provider-issued token.",
+										DescriptionKind: tfprotov6.StringKindPlain,
+									},
+								},
+							},
+						},
+					},
+				},
+			},
 			// Block containing a block: exercises the recursion in the
 			// Nix translation. `outer.inner.value` should end up as a
 			// `types.str` two submodules deep.

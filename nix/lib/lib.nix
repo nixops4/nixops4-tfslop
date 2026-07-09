@@ -110,6 +110,46 @@ let
     block:
     (convertInputAttributes (block.attributes or { }))
     // (convertInputBlockTypes (block.block_types or { }));
+
+  # For outputs, mirror the block structure so provider-computed
+  # attributes end up at their natural path (`outputs.<block>.<attr>`)
+  # instead of collapsing to a flat map. A block appears in outputs
+  # iff it contains a computed attribute at any depth: blocks that are
+  # pure user-config have nothing to project and would only pollute
+  # the output shape.
+  blockHasComputed =
+    block:
+    lib.any (attr: attr.computed or false) (lib.attrValues (block.attributes or { }))
+    || lib.any (bt: blockHasComputed bt.block) (lib.attrValues (block.block_types or { }));
+
+  convertOutputBlockTypes =
+    blockTypes:
+    lib.mapAttrs (
+      name: bt:
+      let
+        inner = types.submodule {
+          options = convertBlockOutputs bt.block;
+        };
+        minItems = bt.min_items or 0;
+        required = minItems >= 1;
+      in
+      mkOption {
+        type =
+          if bt.nesting == "Single" then
+            (if required then inner else types.nullOr inner)
+          else if bt.nesting == "List" then
+            types.listOf inner
+          else
+            throw "tfCommonSchemaToModule: unsupported block nesting ${builtins.toJSON bt.nesting}";
+        readOnly = true;
+        description = "Nested block ${name}";
+      }
+    ) (lib.filterAttrs (_: bt: blockHasComputed bt.block) blockTypes);
+
+  convertBlockOutputs =
+    block:
+    (convertOutputAttributes (block.attributes or { }))
+    // (convertOutputBlockTypes (block.block_types or { }));
 in
 rec {
   /**
@@ -150,10 +190,8 @@ rec {
         inputs = {
           options = convertBlockInputs value.block;
         };
-        # Nested blocks are always user-supplied config, never computed,
-        # so outputs derive from the top-level attributes only.
         outputs = {
-          options = convertOutputAttributes (value.block.attributes or { });
+          options = convertBlockOutputs value.block;
         };
       }) schema.resource_schemas;
     };

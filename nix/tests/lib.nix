@@ -75,6 +75,20 @@ let
     (lib.evalModules {
       modules = [ cfg.resourceTypes.fx_required_single_block.inputs ];
     }).options;
+  fxComputedBlockAttrInputOptions =
+    (lib.evalModules {
+      modules = [ cfg.resourceTypes.fx_computed_block_attr.inputs ];
+    }).options;
+  fxComputedBlockAttrOutputOptions =
+    (lib.evalModules {
+      modules = [ cfg.resourceTypes.fx_computed_block_attr.outputs ];
+    }).options;
+  # Sibling: same shape without a computed inner attribute. Confirms
+  # that a block-with-no-computed-content is *absent* from outputs.
+  fxSingleBlockOutputOptions =
+    (lib.evalModules {
+      modules = [ cfg.resourceTypes.fx_single_block.outputs ];
+    }).options;
 
   # Materialisation of a MinItems=1 Single block: the option must
   # accept a supplied value and expose no default.
@@ -313,5 +327,44 @@ in
   "test required single block value round-trips through option" = {
     expr = materialisedRequiredSingle.settings.endpoint;
     expected = "https://example.invalid";
+  };
+
+  # Computed inner attributes surface as `outputs.<block>.<attr>`.
+  # `endpoint` (required) is on the input side; `token` (computed) is
+  # on the output side. The block appears in both.
+
+  "test computed block attr endpoint is on input" = {
+    expr =
+      (fxComputedBlockAttrInputOptions.settings.type.nestedTypes.elemType.getSubOptions [ ]) ? endpoint;
+    expected = true;
+  };
+
+  "test computed block attr token is not on input" = {
+    expr =
+      (fxComputedBlockAttrInputOptions.settings.type.nestedTypes.elemType.getSubOptions [ ]) ? token;
+    expected = false;
+  };
+
+  "test computed block attr block is present on output" = {
+    expr = fxComputedBlockAttrOutputOptions ? settings;
+    expected = true;
+  };
+
+  "test computed block attr token is on output" = {
+    expr =
+      (fxComputedBlockAttrOutputOptions.settings.type.nestedTypes.elemType.getSubOptions [ ]) ? token;
+    expected = true;
+  };
+
+  "test computed block attr token is readOnly" = {
+    expr =
+      (fxComputedBlockAttrOutputOptions.settings.type.nestedTypes.elemType.getSubOptions [ ])
+      .token.readOnly;
+    expected = true;
+  };
+
+  "test block with no computed content is absent from outputs" = {
+    expr = fxSingleBlockOutputOptions ? settings;
+    expected = false;
   };
 }
