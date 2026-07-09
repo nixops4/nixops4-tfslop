@@ -35,9 +35,7 @@ async fn schema_string_attribute_roundtrip() {
 
     let schema = ProviderSchema::from_wire(raw).expect("parse schema");
 
-    // The fixture declares exactly one resource with one required string.
     assert!(schema.data_source_schemas.is_empty());
-    assert_eq!(schema.resource_schemas.len(), 1);
     let rs = schema
         .resource_schemas
         .get("fx_string")

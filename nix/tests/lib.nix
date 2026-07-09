@@ -38,11 +38,15 @@ let
 
   cfg = providerEval.config;
 
-  # Extract the `inputs` options declared for `fx_string` so we can inspect
-  # the option types the translation emitted.
+  # Extract the `inputs` options declared for each fixture resource so
+  # we can inspect the option types the translation emitted.
   fxStringInputOptions =
     (lib.evalModules {
       modules = [ cfg.resourceTypes.fx_string.inputs ];
+    }).options;
+  fxBoolInputOptions =
+    (lib.evalModules {
+      modules = [ cfg.resourceTypes.fx_bool.inputs ];
     }).options;
 
 in
@@ -79,5 +83,15 @@ in
   "test string attribute description comes from schema" = {
     expr = fxStringInputOptions.value.description;
     expected = "A required string. Echoed back on create.";
+  };
+
+  "test bool attribute becomes types.bool" = {
+    expr = fxBoolInputOptions.value.type.name;
+    expected = "bool";
+  };
+
+  "test bool attribute description comes from schema" = {
+    expr = fxBoolInputOptions.value.description;
+    expected = "A required bool. Echoed back on create.";
   };
 }

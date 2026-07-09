@@ -59,6 +59,20 @@ func (p *fixtureProvider) GetProviderSchema(context.Context, *tfprotov6.GetProvi
 					},
 				},
 			},
+			"fx_bool": {
+				Version: 0,
+				Block: &tfprotov6.SchemaBlock{
+					Attributes: []*tfprotov6.SchemaAttribute{
+						{
+							Name:            "value",
+							Type:            tftypes.Bool,
+							Required:        true,
+							Description:     "A required bool. Echoed back on create.",
+							DescriptionKind: tfprotov6.StringKindPlain,
+						},
+					},
+				},
+			},
 		},
 		DataSourceSchemas: map[string]*tfprotov6.Schema{},
 	}, nil

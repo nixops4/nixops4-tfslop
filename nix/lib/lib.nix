@@ -20,6 +20,8 @@ let
     ctyType:
     if ctyType == "\"string\"" then
       types.str
+    else if ctyType == "\"bool\"" then
+      types.bool
     else
       throw "tfCommonSchemaToModule: unsupported cty type ${builtins.toJSON ctyType}";
 
