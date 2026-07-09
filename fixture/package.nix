@@ -6,9 +6,7 @@ buildGoModule (finalAttrs: {
 
   src = ./.;
 
-  # Placeholder module has no dependencies. When the fixture grows real
-  # imports, replace `null` with the resulting `vendorHash`.
-  vendorHash = null;
+  vendorHash = "sha256-C46TYRTtZo1Y86vDIvE9Ivn4o+ooHgTkZNrWOUuccyk=";
 
   meta.mainProgram = "fixture";
   meta.description = ''
