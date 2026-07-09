@@ -9,6 +9,8 @@ use tokio::process::{Child, Command};
 use tonic::transport::{Channel, Endpoint, Uri};
 use tower::service_fn;
 
+use crate::tfplugin6;
+
 use super::handshake;
 
 /// go-plugin's magic cookie, expected by every Terraform / OpenTofu
@@ -95,4 +97,40 @@ impl ProviderClient {
         let _ = self.process.wait().await;
         Ok(())
     }
+    /// Call `GetProviderSchema` and return the raw response.
+    ///
+    /// Any provider-side [`tfplugin6::Diagnostic`] with error severity in
+    /// the response is surfaced as an `Err` here.
+    pub async fn get_provider_schema(
+        &self,
+    ) -> Result<tfplugin6::get_provider_schema::Response> {
+        let mut client = tfplugin6::provider_client::ProviderClient::new(self.channel.clone());
+        let response = client
+            .get_provider_schema(tonic::Request::new(tfplugin6::get_provider_schema::Request {}))
+            .await
+            .context("calling GetProviderSchema")?
+            .into_inner();
+        check_diagnostics(&response.diagnostics).context("provider returned diagnostics")?;
+        Ok(response)
+    }
 }
+
+/// Turn error-severity diagnostics into an aggregated `Err`.
+fn check_diagnostics(diagnostics: &[tfplugin6::Diagnostic]) -> Result<()> {
+    let errors: Vec<String> = diagnostics
+        .iter()
+        .filter(|d| d.severity == tfplugin6::diagnostic::Severity::Error as i32)
+        .map(|d| {
+            if d.detail.is_empty() {
+                d.summary.clone()
+            } else {
+                format!("{}: {}", d.summary, d.detail)
+            }
+        })
+        .collect();
+    if !errors.is_empty() {
+        bail!("{}", errors.join("; "));
+    }
+    Ok(())
+}
+

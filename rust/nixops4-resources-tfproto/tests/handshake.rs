@@ -22,3 +22,24 @@ async fn spawn_handshake_disconnect() {
         .expect("launch and handshake against fixture");
     client.shutdown().await.expect("clean shutdown");
 }
+
+#[tokio::test]
+async fn empty_schema_fetch() {
+    let Some(path) = fixture_path() else {
+        eprintln!("skipping: NIXOPS4_TFPROTO_FIXTURE not set");
+        return;
+    };
+    let client = ProviderClient::launch(&path)
+        .await
+        .expect("launch fixture");
+    let schema = client
+        .get_provider_schema()
+        .await
+        .expect("fetch empty schema");
+    assert!(schema.resource_schemas.is_empty(), "no resource schemas");
+    assert!(
+        schema.data_source_schemas.is_empty(),
+        "no data source schemas"
+    );
+    client.shutdown().await.expect("clean shutdown");
+}

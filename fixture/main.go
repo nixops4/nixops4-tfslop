@@ -43,7 +43,8 @@ func (p *fixtureProvider) GetMetadata(context.Context, *tfprotov6.GetMetadataReq
 
 func (p *fixtureProvider) GetProviderSchema(context.Context, *tfprotov6.GetProviderSchemaRequest) (*tfprotov6.GetProviderSchemaResponse, error) {
 	return &tfprotov6.GetProviderSchemaResponse{
-		Diagnostics: []*tfprotov6.Diagnostic{notImplemented("GetProviderSchema")},
+		ResourceSchemas:   map[string]*tfprotov6.Schema{},
+		DataSourceSchemas: map[string]*tfprotov6.Schema{},
 	}, nil
 }
 
