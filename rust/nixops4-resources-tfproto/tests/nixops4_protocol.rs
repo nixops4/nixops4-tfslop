@@ -7,6 +7,7 @@
 //! up: adapter parses the request, launches the fixture, runs Plan +
 //! Apply, and returns a response nixops4 accepts.
 
+use nixops4_resource::schema::v0;
 use nixops4_resource_runner::{ResourceProviderClient, ResourceProviderConfig};
 use serde_json::{Map, Value};
 
@@ -57,11 +58,7 @@ async fn update_fx_string_via_nixops4_protocol() {
 
     let mut client = ResourceProviderClient::new(ResourceProviderConfig {
         provider_executable: ADAPTER.to_string(),
-        provider_args: vec![
-            "run".to_string(),
-            "--provider-exe".to_string(),
-            fixture,
-        ],
+        provider_args: vec!["run".to_string(), "--provider-exe".to_string(), fixture],
     })
     .await
     .expect("spawn adapter");
@@ -76,7 +73,12 @@ async fn update_fx_string_via_nixops4_protocol() {
     new_inputs.insert("value".to_string(), Value::String("after".to_string()));
 
     let outputs = client
-        .update("fx_string", &new_inputs, &previous_inputs, &previous_outputs)
+        .update(
+            "fx_string",
+            &new_inputs,
+            &previous_inputs,
+            &previous_outputs,
+        )
         .await
         .expect("update fx_string");
 
@@ -85,6 +87,34 @@ async fn update_fx_string_via_nixops4_protocol() {
         "expected no output properties, got {:?}",
         outputs
     );
+
+    client.close_wait().await.expect("close adapter");
+}
+
+#[tokio::test]
+async fn destroy_fx_string_via_nixops4_protocol() {
+    let Some(fixture) = fixture_path() else {
+        eprintln!("skipping: NIXOPS4_TFPROTO_FIXTURE not set");
+        return;
+    };
+
+    let mut client = ResourceProviderClient::new(ResourceProviderConfig {
+        provider_executable: ADAPTER.to_string(),
+        provider_args: vec!["run".to_string(), "--provider-exe".to_string(), fixture],
+    })
+    .await
+    .expect("spawn adapter");
+
+    let mut prev_inputs = Map::new();
+    prev_inputs.insert("value".to_string(), Value::String("bye".to_string()));
+
+    let resource = v0::ExtantResource {
+        type_: v0::ResourceType("fx_string".to_string()),
+        input_properties: v0::InputProperties(prev_inputs),
+        output_properties: Some(v0::OutputProperties(Map::new())),
+    };
+
+    client.destroy(resource).await.expect("destroy fx_string");
 
     client.close_wait().await.expect("close adapter");
 }

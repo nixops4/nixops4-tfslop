@@ -40,25 +40,36 @@ impl ResourceProvider for TfPluginProvider {
     ) -> Result<v0::UpdateResourceResponse> {
         let type_name = request.resource.type_.0.clone();
         let new_inputs_json = properties_to_cty_json(request.input_properties.0)?;
-        // The tfplugin protocol wants the prior *full* state, not just
-        // the user-controlled inputs. Reconstruct that by layering the
-        // provider's previously-returned outputs on top of the previous
-        // inputs. Same field name in both wins the later value, which
-        // matches how the provider itself would have merged them.
-        let mut prior_map: Map<String, Value> = request.resource.input_properties.0.into_iter().collect();
-        if let Some(prev_outputs) = request.resource.output_properties {
-            for (k, v) in prev_outputs.0 {
-                prior_map.insert(k, v);
-            }
-        }
-        let prior_state_json =
-            serde_json::to_vec(&Value::Object(prior_map)).context("serialising prior state")?;
+        let prior_state_json = extant_to_prior_state_json(
+            request.resource.input_properties.0,
+            request.resource.output_properties.map(|op| op.0),
+        )?;
         let outputs = self
             .plan_and_apply(&type_name, prior_state_json, new_inputs_json)
             .await?;
         Ok(v0::UpdateResourceResponse {
             output_properties: outputs,
         })
+    }
+
+    async fn destroy(
+        &self,
+        request: v0::DestroyResourceRequest,
+    ) -> Result<v0::DestroyResourceResponse> {
+        let type_name = request.resource.type_.0.clone();
+        let prior_state_json = extant_to_prior_state_json(
+            request.resource.input_properties.0,
+            request.resource.output_properties.map(|op| op.0),
+        )?;
+        // A tfplugin destroy is Plan + Apply with `proposed_new_state`
+        // = `planned_state` = `config` = cty null. The provider echoes
+        // that null through to `new_state`, and any output properties
+        // the provider might have returned are discarded — nixops4
+        // will drop the resource from state.
+        let _ = self
+            .plan_and_apply(&type_name, prior_state_json, b"null".to_vec())
+            .await?;
+        Ok(v0::DestroyResourceResponse {})
     }
 }
 
@@ -73,8 +84,7 @@ impl TfPluginProvider {
         inputs_json: Vec<u8>,
     ) -> Result<v0::OutputProperties> {
         let client = ProviderClient::launch(&self.provider_exe).await?;
-        let result =
-            plan_and_apply_inner(&client, type_name, prior_state_json, inputs_json).await;
+        let result = plan_and_apply_inner(&client, type_name, prior_state_json, inputs_json).await;
         client.shutdown().await?;
         result
     }
@@ -122,4 +132,21 @@ async fn plan_and_apply_inner(
 
 fn properties_to_cty_json(props: Map<String, Value>) -> Result<Vec<u8>> {
     serde_json::to_vec(&Value::Object(props)).context("serialising resource properties")
+}
+
+/// Build a full go-cty JSON prior_state from the split nixops4 view
+/// (`input_properties` + `output_properties`). If the provider reused
+/// an attribute name for a computed field, the newer (output) value
+/// wins — same order a provider would have merged them internally.
+fn extant_to_prior_state_json(
+    prev_inputs: Map<String, Value>,
+    prev_outputs: Option<Map<String, Value>>,
+) -> Result<Vec<u8>> {
+    let mut prior_map = prev_inputs;
+    if let Some(outputs) = prev_outputs {
+        for (k, v) in outputs {
+            prior_map.insert(k, v);
+        }
+    }
+    serde_json::to_vec(&Value::Object(prior_map)).context("serialising prior state")
 }
