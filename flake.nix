@@ -10,7 +10,7 @@
     # feat/isOptionalInputName, feat/nixops4-destroy, plus a golden-diff
     # workaround for render-provider-docs). Repoint to the upstream
     # commit once these land.
-    nixops4.url = "git+https://scratch.notatio.nl/botbot/nixops4?ref=groups&rev=ae0ab4e6fc54bcf5f55bcd3eae3aa356a8b63a10";
+    nixops4.url = "git+https://scratch.notatio.nl/botbot/nixops4?ref=groups&rev=9458c4b6871cb0b7946fcff49b05bcc2374ea3bf";
     nixpkgs.follows = "nixops4/nixpkgs";
   };
 

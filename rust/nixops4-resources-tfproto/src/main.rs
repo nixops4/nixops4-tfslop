@@ -1,12 +1,17 @@
 //! CLI for `nixops4-resources-tfproto`.
 //!
-//! `schema --provider-exe <path>` launches a tfplugin v6 provider and
-//! writes its schema, translated into [`ProviderSchema`], as JSON to
-//! stdout. That JSON is what `tfCommonSchemaToModule` reads from Nix.
+//! * `schema --provider-exe <path>` launches a tfplugin v6 provider and
+//!   writes its schema, translated into [`ProviderSchema`], as JSON to
+//!   stdout. That JSON is what `tfCommonSchemaToModule` reads from Nix.
+//! * `run --provider-exe <path>` serves as a NixOps4 resource provider,
+//!   translating each NixOps4 request into a tfplugin gRPC sequence
+//!   against the child provider.
 
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
-use nixops4_resources_tfproto::{schema::ProviderSchema, tf_provider_client::ProviderClient};
+use nixops4_resources_tfproto::{
+    provider::TfPluginProvider, schema::ProviderSchema, tf_provider_client::ProviderClient,
+};
 
 #[derive(Parser)]
 #[command(name = "nixops4-resources-tfproto", version, about)]
@@ -23,6 +28,12 @@ enum Command {
         #[arg(long)]
         provider_exe: String,
     },
+    /// Serve as a NixOps4 resource provider driving the given tfplugin binary.
+    Run {
+        /// Path to the tfplugin v6 provider binary.
+        #[arg(long)]
+        provider_exe: String,
+    },
 }
 
 fn main() -> Result<()> {
@@ -36,7 +47,13 @@ async fn async_main() -> Result<()> {
     let cli = Cli::parse();
     match cli.command {
         Command::Schema { provider_exe } => cmd_schema(&provider_exe).await,
+        Command::Run { provider_exe } => cmd_run(provider_exe).await,
     }
+}
+
+async fn cmd_run(provider_exe: String) -> Result<()> {
+    nixops4_resource::framework::run_main(TfPluginProvider::new(provider_exe)).await;
+    Ok(())
 }
 
 async fn cmd_schema(provider_exe: &str) -> Result<()> {
