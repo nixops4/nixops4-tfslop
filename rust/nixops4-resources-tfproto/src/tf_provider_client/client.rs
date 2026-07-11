@@ -2,6 +2,7 @@
 
 use anyhow::{bail, Context, Result};
 use hyper_util::rt::TokioIo;
+use std::future::Future;
 use std::process::Stdio;
 use std::sync::Mutex;
 use std::time::Duration;
@@ -36,12 +37,31 @@ pub struct ProviderClient {
     // across an await.
     process: Mutex<Child>,
     channel: Channel,
+    /// Maximum time to wait for any single RPC. `None` means wait
+    /// indefinitely — use with caution: a hung provider stalls the
+    /// adapter forever. Callers with a bound on acceptable latency
+    /// (nixops4-side or tests) should set one.
+    rpc_timeout: Option<Duration>,
 }
 
 impl ProviderClient {
-    /// Spawn `provider_path`, read the handshake line from its stdout,
-    /// and connect over gRPC.
+    /// Spawn `provider_path`, handshake, and connect over gRPC.
+    /// No per-RPC timeout is enforced — appropriate for callers that
+    /// handle their own bounding, or when running against a fixture.
     pub async fn launch(provider_path: &str) -> Result<Self> {
+        Self::launch_inner(provider_path, None).await
+    }
+
+    /// Same as [`launch`] but bounds every RPC by `rpc_timeout`.
+    /// A timed-out RPC returns an error rather than blocking forever.
+    pub async fn launch_with_rpc_timeout(
+        provider_path: &str,
+        rpc_timeout: Duration,
+    ) -> Result<Self> {
+        Self::launch_inner(provider_path, Some(rpc_timeout)).await
+    }
+
+    async fn launch_inner(provider_path: &str, rpc_timeout: Option<Duration>) -> Result<Self> {
         let mut cmd = Command::new(provider_path);
         cmd.env("PLUGIN_PROTOCOL_VERSIONS", "6")
             .env("TF_PLUGIN_MAGIC_COOKIE", TF_PLUGIN_MAGIC_COOKIE_VALUE)
@@ -104,6 +124,7 @@ impl ProviderClient {
         Ok(ProviderClient {
             process: Mutex::new(process),
             channel,
+            rpc_timeout,
         })
     }
 
@@ -186,6 +207,28 @@ impl ProviderClient {
         let base = anyhow::Error::from(e).context(format!("calling {}", rpc));
         self.decorate_with_child_exit(base).await
     }
+
+    /// Await `future` and, if a per-RPC timeout is set, bound the
+    /// wait. On timeout, return an error naming the RPC and the
+    /// elapsed budget. On tonic error, decorate via the transport
+    /// path (child-exit correlation, RPC name).
+    async fn bounded_rpc<T>(
+        &self,
+        rpc: &str,
+        future: impl Future<Output = std::result::Result<tonic::Response<T>, tonic::Status>>,
+    ) -> Result<T> {
+        let result = match self.rpc_timeout {
+            None => future.await,
+            Some(t) => match tokio::time::timeout(t, future).await {
+                Ok(r) => r,
+                Err(_) => bail!("calling {}: RPC timeout after {:?}", rpc, t),
+            },
+        };
+        match result {
+            Ok(r) => Ok(r.into_inner()),
+            Err(e) => Err(self.on_transport_error(rpc, e).await),
+        }
+    }
     fn provider(&self) -> tfplugin6::provider_client::ProviderClient<Channel> {
         tfplugin6::provider_client::ProviderClient::new(self.channel.clone())
     }
@@ -195,16 +238,14 @@ impl ProviderClient {
     /// Any provider-side [`tfplugin6::Diagnostic`] with error severity in
     /// the response is surfaced as an `Err` here.
     pub async fn get_provider_schema(&self) -> Result<tfplugin6::get_provider_schema::Response> {
-        let response = match self
-            .provider()
-            .get_provider_schema(tonic::Request::new(
-                tfplugin6::get_provider_schema::Request {},
-            ))
-            .await
-        {
-            Ok(r) => r.into_inner(),
-            Err(e) => return Err(self.on_transport_error("GetProviderSchema", e).await),
-        };
+        let response = self
+            .bounded_rpc(
+                "GetProviderSchema",
+                self.provider().get_provider_schema(tonic::Request::new(
+                    tfplugin6::get_provider_schema::Request {},
+                )),
+            )
+            .await?;
         check_diagnostics(&response.diagnostics)?;
         Ok(response)
     }
@@ -213,14 +254,13 @@ impl ProviderClient {
     /// signal for graceful shutdown; providers use it to abort
     /// in-flight work, flush state, and close connections.
     pub async fn stop_provider(&self) -> Result<()> {
-        let response = match self
-            .provider()
-            .stop_provider(tonic::Request::new(tfplugin6::stop_provider::Request {}))
-            .await
-        {
-            Ok(r) => r.into_inner(),
-            Err(e) => return Err(self.on_transport_error("StopProvider", e).await),
-        };
+        let response = self
+            .bounded_rpc(
+                "StopProvider",
+                self.provider()
+                    .stop_provider(tonic::Request::new(tfplugin6::stop_provider::Request {})),
+            )
+            .await?;
         if !response.error.is_empty() {
             bail!("{}", response.error);
         }
@@ -239,14 +279,12 @@ impl ProviderClient {
             }),
             client_capabilities: None,
         };
-        let response = match self
-            .provider()
-            .configure_provider(tonic::Request::new(req))
-            .await
-        {
-            Ok(r) => r.into_inner(),
-            Err(e) => return Err(self.on_transport_error("ConfigureProvider", e).await),
-        };
+        let response = self
+            .bounded_rpc(
+                "ConfigureProvider",
+                self.provider().configure_provider(tonic::Request::new(req)),
+            )
+            .await?;
         check_diagnostics(&response.diagnostics)
     }
 
@@ -272,14 +310,13 @@ impl ProviderClient {
             client_capabilities: None,
             prior_identity: None,
         };
-        let response = match self
-            .provider()
-            .plan_resource_change(tonic::Request::new(req))
-            .await
-        {
-            Ok(r) => r.into_inner(),
-            Err(e) => return Err(self.on_transport_error("PlanResourceChange", e).await),
-        };
+        let response = self
+            .bounded_rpc(
+                "PlanResourceChange",
+                self.provider()
+                    .plan_resource_change(tonic::Request::new(req)),
+            )
+            .await?;
         check_diagnostics(&response.diagnostics)?;
         Ok(response)
     }
@@ -302,14 +339,13 @@ impl ProviderClient {
             provider_meta: None,
             planned_identity: None,
         };
-        let response = match self
-            .provider()
-            .apply_resource_change(tonic::Request::new(req))
-            .await
-        {
-            Ok(r) => r.into_inner(),
-            Err(e) => return Err(self.on_transport_error("ApplyResourceChange", e).await),
-        };
+        let response = self
+            .bounded_rpc(
+                "ApplyResourceChange",
+                self.provider()
+                    .apply_resource_change(tonic::Request::new(req)),
+            )
+            .await?;
         check_diagnostics(&response.diagnostics)?;
         Ok(response)
     }

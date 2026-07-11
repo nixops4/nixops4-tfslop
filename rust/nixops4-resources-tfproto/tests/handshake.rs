@@ -146,6 +146,46 @@ async fn update_string_via_plan_apply() {
     assert_eq!(new_state.json, br#"{"value":"after"}"#);
 }
 
+// #37 R2: an RPC against a hung provider must not hang the adapter.
+// Every RPC needs a bounded wait; blowing past it errors out so
+// `nixops4 apply` can surface it rather than freeze.
+#[tokio::test]
+async fn plan_against_hanging_provider_times_out() {
+    let Some(path) = fixture_path() else {
+        eprintln!("skipping: NIXOPS4_TFPROTO_FIXTURE not set");
+        return;
+    };
+    let client = ProviderClient::launch_with_rpc_timeout(&path, Duration::from_millis(500))
+        .await
+        .expect("launch fixture");
+
+    let start = std::time::Instant::now();
+    let result = client
+        .plan_resource_change(
+            "fx_hang_on_plan",
+            b"null".to_vec(),
+            b"{}".to_vec(),
+            b"{}".to_vec(),
+        )
+        .await;
+    let elapsed = start.elapsed();
+    let _ = client.shutdown().await;
+
+    let err = result.expect_err("Plan against a hanging provider must error");
+    // Some slack — the timeout is 500ms, the polling loop and OS
+    // scheduler add jitter, but the whole thing should still be
+    // over well under the 2s budget.
+    assert!(
+        elapsed < Duration::from_secs(2),
+        "timeout took too long: {elapsed:?}"
+    );
+    let chain = format!("{err:#}");
+    assert!(
+        chain.to_lowercase().contains("timeout") || chain.to_lowercase().contains("timed out"),
+        "error should identify a timeout; got: {chain}"
+    );
+}
+
 // #37 R1: dropping a ProviderClient without calling shutdown must
 // not leak the child process. `shutdown()` is the graceful path;
 // `Drop` is the safety net for the panic / forgotten-call path.

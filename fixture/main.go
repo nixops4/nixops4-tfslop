@@ -274,6 +274,9 @@ func (p *fixtureProvider) GetProviderSchema(context.Context, *tfprotov6.GetProvi
 			// RPC error across both Plan and Apply. Two axes,
 			// data-driven — encoding them into resource-type names
 			// would produce a resource per combination.
+			// Blocks forever in its Plan handler. Exercises the
+			// adapter's per-RPC timeout.
+			"fx_hang_on_plan": {Version: 0, Block: &tfprotov6.SchemaBlock{}},
 			"fx_die": {
 				Version: 0,
 				Block: &tfprotov6.SchemaBlock{
@@ -494,6 +497,11 @@ func (p *fixtureProvider) PlanResourceChange(_ context.Context, req *tfprotov6.P
 		if p, ok := parseDieParams(req.ProposedNewState); ok && p.CrashingOperation == "plan" {
 			os.Exit(p.ExitCode)
 		}
+	}
+	// fx_hang_on_plan: block forever so the adapter's per-RPC
+	// timeout can be exercised. The child is reaped on shutdown.
+	if req.TypeName == "fx_hang_on_plan" {
+		select {}
 	}
 	// Assert that the adapter honours write_only on prior_state.
 	if req.TypeName == "fx_write_only" && priorStateHasField(req.PriorState, "secret") {
