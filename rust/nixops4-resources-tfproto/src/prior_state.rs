@@ -69,11 +69,20 @@ fn strip_write_only_block_type(bt: &BlockType, state: &mut Value) {
                 strip_write_only_block(&bt.block, m);
             }
         }
-        NestingMode::List => {
+        NestingMode::List | NestingMode::Set => {
             if let Value::Array(arr) = state {
                 for elem in arr.iter_mut() {
                     if let Value::Object(m) = elem {
                         strip_write_only_block(&bt.block, m);
+                    }
+                }
+            }
+        }
+        NestingMode::Map => {
+            if let Value::Object(m) = state {
+                for elem in m.values_mut() {
+                    if let Value::Object(inner) = elem {
+                        strip_write_only_block(&bt.block, inner);
                     }
                 }
             }

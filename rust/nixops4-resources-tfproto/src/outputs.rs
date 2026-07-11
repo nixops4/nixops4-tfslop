@@ -93,7 +93,7 @@ fn project_block_type(bt: &BlockType, state: Option<&Value>, path: &str) -> Resu
                 Ok(Value::Object(inner))
             }
         },
-        NestingMode::List => {
+        NestingMode::List | NestingMode::Set => {
             let arr = state
                 .and_then(|v| v.as_array())
                 .cloned()
@@ -106,6 +106,20 @@ fn project_block_type(bt: &BlockType, state: Option<&Value>, path: &str) -> Resu
                 items.push(Value::Object(inner));
             }
             Ok(Value::Array(items))
+        }
+        NestingMode::Map => {
+            let obj = state
+                .and_then(|v| v.as_object())
+                .cloned()
+                .unwrap_or_default();
+            let mut projected: Map<String, Value> = Map::new();
+            for (key, elem) in obj.iter() {
+                let mut inner = Map::new();
+                let elem_path = format!("{}[\"{}\"]", path, key);
+                project_block(&bt.block, elem, &mut inner, &elem_path)?;
+                projected.insert(key.clone(), Value::Object(inner));
+            }
+            Ok(Value::Object(projected))
         }
         NestingMode::Unsupported(mode) => {
             bail!(

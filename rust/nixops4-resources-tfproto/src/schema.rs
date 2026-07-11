@@ -70,6 +70,12 @@ fn is_zero_i64(n: &i64) -> bool {
 pub enum NestingMode {
     Single,
     List,
+    /// Multiple instances, treated as an unordered set. Order and
+    /// duplicates are semantically noise; the provider deduplicates.
+    Set,
+    /// Multiple instances keyed by a string label (HCL: `role "admin"`).
+    /// Maps to `types.attrsOf submodule` on the Nix side.
+    Map,
     /// Any nesting mode we don't handle yet — the raw variant name from
     /// the proto is preserved so the Nix side can surface a specific
     /// error rather than a generic "unknown".
@@ -185,6 +191,8 @@ impl NestingMode {
         match W::try_from(nesting) {
             Ok(W::Single) => NestingMode::Single,
             Ok(W::List) => NestingMode::List,
+            Ok(W::Set) => NestingMode::Set,
+            Ok(W::Map) => NestingMode::Map,
             Ok(other) => NestingMode::Unsupported(format!("{:?}", other)),
             Err(_) => NestingMode::Unsupported(format!("unknown({})", nesting)),
         }

@@ -428,6 +428,56 @@ func (p *fixtureProvider) GetProviderSchema(context.Context, *tfprotov6.GetProvi
 					},
 				},
 			},
+			// Set-nested block: a block that can appear multiple
+			// times, treated as an unordered set. Interior fields
+			// determine identity; duplicates get dedup'd.
+			"fx_set_block": {
+				Version: 0,
+				Block: &tfprotov6.SchemaBlock{
+					BlockTypes: []*tfprotov6.SchemaNestedBlock{
+						{
+							TypeName: "rule",
+							Nesting:  tfprotov6.SchemaNestedBlockNestingModeSet,
+							Block: &tfprotov6.SchemaBlock{
+								Attributes: []*tfprotov6.SchemaAttribute{
+									{
+										Name:            "name",
+										Type:            tftypes.String,
+										Required:        true,
+										Description:     "Rule name.",
+										DescriptionKind: tfprotov6.StringKindPlain,
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+			// Map-nested block: entries keyed by a string label.
+			// `role "admin" { ... }` becomes `role."admin" = { ... };`
+			// on the Nix side.
+			"fx_map_block": {
+				Version: 0,
+				Block: &tfprotov6.SchemaBlock{
+					BlockTypes: []*tfprotov6.SchemaNestedBlock{
+						{
+							TypeName: "role",
+							Nesting:  tfprotov6.SchemaNestedBlockNestingModeMap,
+							Block: &tfprotov6.SchemaBlock{
+								Attributes: []*tfprotov6.SchemaAttribute{
+									{
+										Name:            "arn",
+										Type:            tftypes.String,
+										Required:        true,
+										Description:     "Role ARN.",
+										DescriptionKind: tfprotov6.StringKindPlain,
+									},
+								},
+							},
+						},
+					},
+				},
+			},
 			// List-nested block with MinItems=2: fewer entries must
 			// fail before spawning the provider.
 			"fx_min_list_block": {

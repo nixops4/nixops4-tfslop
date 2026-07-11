@@ -145,6 +145,42 @@ let
     (lib.evalModules {
       modules = [ cfg.resourceTypes.fx_list_block.inputs ];
     }).options;
+  fxSetBlockInputOptions =
+    (lib.evalModules {
+      modules = [ cfg.resourceTypes.fx_set_block.inputs ];
+    }).options;
+  fxMapBlockInputOptions =
+    (lib.evalModules {
+      modules = [ cfg.resourceTypes.fx_map_block.inputs ];
+    }).options;
+  materialisedSetBlock =
+    (lib.evalModules {
+      modules = [
+        cfg.resourceTypes.fx_set_block.inputs
+        {
+          rule = [
+            { name = "a"; }
+            { name = "b"; }
+          ];
+        }
+      ];
+    }).config;
+  materialisedMapBlock =
+    (lib.evalModules {
+      modules = [
+        cfg.resourceTypes.fx_map_block.inputs
+        {
+          role = {
+            admin = {
+              arn = "arn:admin";
+            };
+            reader = {
+              arn = "arn:reader";
+            };
+          };
+        }
+      ];
+    }).config;
   fxOptionalBlockAttrInputOptions =
     (lib.evalModules {
       modules = [ cfg.resourceTypes.fx_optional_block_attr.inputs ];
@@ -460,6 +496,49 @@ in
   "test list block default is empty list" = {
     expr = fxListBlockInputOptions.rule.default;
     expected = [ ];
+  };
+
+  # Set-nested block: shape mirrors a List (users write a list of
+  # submodule instances), but interior "order and duplicates don't
+  # matter" is documented as a provider concern. We accept the same
+  # value shape as List.
+
+  "test set block becomes listOf submodule" = {
+    expr = fxSetBlockInputOptions.rule.type.name;
+    expected = "listOf";
+  };
+
+  "test set block element is a submodule" = {
+    expr = fxSetBlockInputOptions.rule.type.functor.payload.elemType.name;
+    expected = "submodule";
+  };
+
+  "test set block value round-trips through option" = {
+    expr = builtins.map (r: r.name) materialisedSetBlock.rule;
+    expected = [
+      "a"
+      "b"
+    ];
+  };
+
+  # Map-nested block: keyed by a string label.
+
+  "test map block becomes attrsOf submodule" = {
+    expr = fxMapBlockInputOptions.role.type.name;
+    expected = "attrsOf";
+  };
+
+  "test map block element is a submodule" = {
+    expr = fxMapBlockInputOptions.role.type.functor.payload.elemType.name;
+    expected = "submodule";
+  };
+
+  "test map block value round-trips through option" = {
+    expr = builtins.mapAttrs (_: v: v.arn) materialisedMapBlock.role;
+    expected = {
+      admin = "arn:admin";
+      reader = "arn:reader";
+    };
   };
 
   # Optional attributes inside a block must survive the

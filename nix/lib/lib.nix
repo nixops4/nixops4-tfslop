@@ -196,17 +196,28 @@ let
           type =
             if bt.nesting == "Single" then
               (if required then inner else types.nullOr inner)
-            else if bt.nesting == "List" then
+            else if bt.nesting == "List" || bt.nesting == "Set" then
               types.listOf inner
+            else if bt.nesting == "Map" then
+              types.attrsOf inner
             else
               throw "tfCommonSchemaToModule: unsupported block nesting ${builtins.toJSON bt.nesting}";
           description = "Nested block ${name}";
         }
         // lib.optionalAttrs (!required) {
-          default = if bt.nesting == "Single" then null else [ ];
+          default =
+            if bt.nesting == "Single" then
+              null
+            else if bt.nesting == "Map" then
+              { }
+            else
+              [ ];
         }
         // lib.optionalAttrs (bt.nesting == "List" && (minItems > 0 || maxItems > 0)) {
           apply = enforceLength;
+        }
+        // lib.optionalAttrs (bt.nesting == "Set") {
+          apply = lib.unique;
         }
       )
     ) blockTypes;
@@ -242,8 +253,10 @@ let
         type =
           if bt.nesting == "Single" then
             (if required then inner else types.nullOr inner)
-          else if bt.nesting == "List" then
+          else if bt.nesting == "List" || bt.nesting == "Set" then
             types.listOf inner
+          else if bt.nesting == "Map" then
+            types.attrsOf inner
           else
             throw "tfCommonSchemaToModule: unsupported block nesting ${builtins.toJSON bt.nesting}";
         readOnly = true;
