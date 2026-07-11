@@ -63,6 +63,25 @@ let
     (lib.evalModules {
       modules = [ cfg.resourceTypes.fx_map_string.inputs ];
     }).options;
+  fxSetStringInputOptions =
+    (lib.evalModules {
+      modules = [ cfg.resourceTypes.fx_set_string.inputs ];
+    }).options;
+  # Feed a list with duplicates: the apply-time dedup must canonicalise
+  # it so the on-wire value doesn't carry noise into state diffs.
+  materialisedSet =
+    (lib.evalModules {
+      modules = [
+        cfg.resourceTypes.fx_set_string.inputs
+        {
+          value = [
+            "a"
+            "b"
+            "a"
+          ];
+        }
+      ];
+    }).config;
   materialisedMap =
     (lib.evalModules {
       modules = [
@@ -320,6 +339,28 @@ in
       env = "prod";
       team = "platform";
     };
+  };
+
+  # cty `set(T)` attribute → `types.listOf T` with dedup at apply.
+  # Terraform's set semantics don't care about order or duplicates;
+  # canonicalising here prevents state noise.
+
+  "test set-of-string attribute becomes types.listOf" = {
+    expr = fxSetStringInputOptions.value.type.name;
+    expected = "listOf";
+  };
+
+  "test set-of-string element type is types.str" = {
+    expr = fxSetStringInputOptions.value.type.functor.payload.elemType.name;
+    expected = "str";
+  };
+
+  "test set-of-string dedupes duplicates" = {
+    expr = materialisedSet.value;
+    expected = [
+      "a"
+      "b"
+    ];
   };
 
   # Nested blocks. A Single-nesting block becomes `nullOr submodule` so

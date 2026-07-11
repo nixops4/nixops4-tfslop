@@ -103,6 +103,23 @@ func (p *fixtureProvider) GetProviderSchema(context.Context, *tfprotov6.GetProvi
 					},
 				},
 			},
+			// cty `set(T)` attribute: unordered, unique-valued
+			// collection. On the wire it's shaped like a list; the
+			// semantic difference lives in the type tag.
+			"fx_set_string": {
+				Version: 0,
+				Block: &tfprotov6.SchemaBlock{
+					Attributes: []*tfprotov6.SchemaAttribute{
+						{
+							Name:            "value",
+							Type:            tftypes.Set{ElementType: tftypes.String},
+							Required:        true,
+							Description:     "A required set of strings.",
+							DescriptionKind: tfprotov6.StringKindPlain,
+						},
+					},
+				},
+			},
 			// cty `map(T)` attribute: dynamic string keys, uniform
 			// value type. The `tags = { … }` pattern most providers
 			// expose.

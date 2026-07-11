@@ -43,6 +43,13 @@ let
     # `attrsOf` — the same "arbitrary keys" nix concept.
     else if builtins.isList parsed && builtins.length parsed == 2 && builtins.head parsed == "map" then
       types.attrsOf (ctyParsedToOptionType (builtins.elemAt parsed 1))
+    # cty `set(T)`: unordered, unique-valued collection. nixpkgs has
+    # no distinct set type, so translate to listOf T and deduplicate
+    # at apply. Terraform's set semantics don't care about order or
+    # duplicates, and canonicalising avoids noisy state diffs when
+    # equivalent configs happen to serialise differently.
+    else if builtins.isList parsed && builtins.length parsed == 2 && builtins.head parsed == "set" then
+      types.listOf (ctyParsedToOptionType (builtins.elemAt parsed 1))
     # cty `object` type: the attribute's *value* is a fixed-shape
     # struct. The wire encoding is `["object", {field: type, …}]`.
     # Structurally the same target as a Single-nesting block minus
@@ -65,25 +72,44 @@ let
     else
       throw "tfCommonSchemaToModule: unsupported cty type ${builtins.toJSON parsed}";
 
+  # A parsed cty type is a set iff its wire encoding starts with "set".
+  # Used to attach `apply = lib.unique` on options whose value is a
+  # set — nixpkgs has no set type, so the canonicalisation happens at
+  # the option level.
+  ctyIsSet =
+    parsed: builtins.isList parsed && builtins.length parsed == 2 && builtins.head parsed == "set";
+
   convertInputAttributes =
     attrs:
     lib.mapAttrs (
       _name: attr:
-      mkOption {
-        type = ctyTypeToOptionType attr.type;
-        description = if attr.description or "" != "" then attr.description else "Terraform input";
-      }
+      let
+        parsed = builtins.fromJSON attr.type;
+      in
+      mkOption (
+        {
+          type = ctyParsedToOptionType parsed;
+          description = if attr.description or "" != "" then attr.description else "Terraform input";
+        }
+        // lib.optionalAttrs (ctyIsSet parsed) { apply = lib.unique; }
+      )
     ) (lib.filterAttrs (_: attr: attr.required or false || attr.optional or false) attrs);
 
   convertOutputAttributes =
     attrs:
     lib.mapAttrs (
       _name: attr:
-      mkOption {
-        type = ctyTypeToOptionType attr.type;
-        description = if attr.description or "" != "" then attr.description else "Terraform output";
-        readOnly = true;
-      }
+      let
+        parsed = builtins.fromJSON attr.type;
+      in
+      mkOption (
+        {
+          type = ctyParsedToOptionType parsed;
+          description = if attr.description or "" != "" then attr.description else "Terraform output";
+          readOnly = true;
+        }
+        // lib.optionalAttrs (ctyIsSet parsed) { apply = lib.unique; }
+      )
     ) (lib.filterAttrs (_: attr: attr.computed or false) attrs);
 
   # Nested blocks recurse into their own inner block; the inner block
