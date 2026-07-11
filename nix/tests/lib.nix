@@ -83,6 +83,24 @@ let
     (lib.evalModules {
       modules = [ cfg.resourceTypes.fx_computed_block_attr.outputs ];
     }).options;
+  fxComputedOutputOptions =
+    (lib.evalModules {
+      modules = [ cfg.resourceTypes.fx_computed.outputs ];
+    }).options;
+  fxComputedInputOptions =
+    (lib.evalModules {
+      modules = [ cfg.resourceTypes.fx_computed.inputs ];
+    }).options;
+  # Materialise a value through the output side: nixops4 writes into
+  # `outputs.<name>` on Apply. This proves the option accepts the
+  # shape the projection actually produces.
+  materialisedComputedOutputs =
+    (lib.evalModules {
+      modules = [
+        cfg.resourceTypes.fx_computed.outputs
+        { id = "computed-nixops4"; }
+      ];
+    }).config;
   # Sibling: same shape without a computed inner attribute. Confirms
   # that a block-with-no-computed-content is *absent* from outputs.
   fxSingleBlockOutputOptions =
@@ -366,5 +384,36 @@ in
   "test block with no computed content is absent from outputs" = {
     expr = fxSingleBlockOutputOptions ? settings;
     expected = false;
+  };
+
+  # A computed top-level attribute is exposed on the outputs side, not
+  # inputs. The optional user input `value` stays on inputs only.
+
+  "test computed top-level id is on outputs" = {
+    expr = fxComputedOutputOptions ? id;
+    expected = true;
+  };
+
+  "test computed top-level id is readOnly" = {
+    expr = fxComputedOutputOptions.id.readOnly;
+    expected = true;
+  };
+
+  "test computed top-level id is not on inputs" = {
+    expr = fxComputedInputOptions ? id;
+    expected = false;
+  };
+
+  "test computed top-level value is on inputs" = {
+    expr = fxComputedInputOptions ? value;
+    expected = true;
+  };
+
+  # Materialisation: nixops4 will assign into outputs on Apply. The
+  # option must accept the shape the runtime projection produces.
+
+  "test computed top-level output round-trips through option" = {
+    expr = materialisedComputedOutputs.id;
+    expected = "computed-nixops4";
   };
 }

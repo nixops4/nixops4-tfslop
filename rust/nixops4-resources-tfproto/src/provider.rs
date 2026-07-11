@@ -6,6 +6,8 @@ use nixops4_resource::framework::ResourceProvider;
 use nixops4_resource::schema::v0;
 use serde_json::{Map, Value};
 
+use crate::outputs::project_new_state;
+use crate::schema::ProviderSchema;
 use crate::tf_provider_client::ProviderClient;
 
 pub struct TfPluginProvider {
@@ -96,6 +98,12 @@ async fn plan_and_apply_inner(
     prior_state_json: Vec<u8>,
     inputs_json: Vec<u8>,
 ) -> Result<v0::OutputProperties> {
+    // Schema is fetched once per adapter invocation. The projection of
+    // `new_state` onto declared computed outputs needs it — we cannot
+    // reliably tell computed attributes from user inputs without it.
+    let raw_schema = client.get_provider_schema().await?;
+    let schema = ProviderSchema::from_wire(raw_schema)?;
+
     // The fixture takes no configuration. Real providers configured
     // through the resource `tf-provider-*` prefix mechanism land later
     // in the series.
@@ -122,12 +130,10 @@ async fn plan_and_apply_inner(
             inputs_json,
         )
         .await?;
-    let _new_state = apply.new_state.context("provider returned no new_state")?;
+    let new_state = apply.new_state.context("provider returned no new_state")?;
 
-    // No computed attributes across the surface we test today. When we
-    // add them, project `new_state` onto only the schema's `computed`
-    // fields — the protocol explicitly discourages echoing inputs.
-    Ok(v0::OutputProperties(Map::new()))
+    let outputs = project_new_state(&schema, type_name, &new_state.json)?;
+    Ok(v0::OutputProperties(outputs))
 }
 
 fn properties_to_cty_json(props: Map<String, Value>) -> Result<Vec<u8>> {

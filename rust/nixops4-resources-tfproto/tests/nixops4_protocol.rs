@@ -92,6 +92,97 @@ async fn update_fx_string_via_nixops4_protocol() {
 }
 
 #[tokio::test]
+async fn create_fx_computed_projects_id_output() {
+    let Some(fixture) = fixture_path() else {
+        eprintln!("skipping: NIXOPS4_TFPROTO_FIXTURE not set");
+        return;
+    };
+
+    let mut client = ResourceProviderClient::new(ResourceProviderConfig {
+        provider_executable: ADAPTER.to_string(),
+        provider_args: vec!["run".to_string(), "--provider-exe".to_string(), fixture],
+    })
+    .await
+    .expect("spawn adapter");
+
+    let mut inputs = Map::new();
+    inputs.insert("value".to_string(), Value::String("nixops4".to_string()));
+
+    let outputs = client
+        .create("fx_computed", &inputs, true)
+        .await
+        .expect("create fx_computed");
+
+    // The fixture populates `id = "computed-" + value` during Plan.
+    // The user-provided `value` must not leak into outputs.
+    assert_eq!(
+        outputs.get("id"),
+        Some(&Value::String("computed-nixops4".to_string())),
+        "id output missing or wrong: {:?}",
+        outputs
+    );
+    assert!(
+        !outputs.contains_key("value"),
+        "value must not appear in outputs (it is user input, not computed): {:?}",
+        outputs
+    );
+
+    client.close_wait().await.expect("close adapter");
+}
+
+#[tokio::test]
+async fn create_fx_computed_block_projects_nested_token() {
+    let Some(fixture) = fixture_path() else {
+        eprintln!("skipping: NIXOPS4_TFPROTO_FIXTURE not set");
+        return;
+    };
+
+    let mut client = ResourceProviderClient::new(ResourceProviderConfig {
+        provider_executable: ADAPTER.to_string(),
+        provider_args: vec!["run".to_string(), "--provider-exe".to_string(), fixture],
+    })
+    .await
+    .expect("spawn adapter");
+
+    // Populate the nested block; the fixture computes a token from the
+    // endpoint.
+    let mut settings = Map::new();
+    settings.insert(
+        "endpoint".to_string(),
+        Value::String("https://example.invalid".to_string()),
+    );
+    let mut inputs = Map::new();
+    inputs.insert("settings".to_string(), Value::Object(settings));
+
+    let outputs = client
+        .create("fx_computed_block_attr", &inputs, true)
+        .await
+        .expect("create fx_computed_block_attr");
+
+    // Outputs preserve block structure. `endpoint` is a user input
+    // and must not appear in outputs; `token` is computed and must.
+    let out_settings = outputs
+        .get("settings")
+        .and_then(|v| v.as_object())
+        .expect("settings block projected into outputs");
+    assert_eq!(
+        out_settings.get("token"),
+        Some(&Value::String(
+            "token-for-https://example.invalid".to_string()
+        )),
+        "token projection wrong: {:?}",
+        out_settings
+    );
+    assert!(
+        !out_settings.contains_key("endpoint"),
+        "endpoint (user input) must not appear in outputs: {:?}",
+        out_settings
+    );
+
+    client.close_wait().await.expect("close adapter");
+}
+
+#[tokio::test]
 async fn destroy_fx_string_via_nixops4_protocol() {
     let Some(fixture) = fixture_path() else {
         eprintln!("skipping: NIXOPS4_TFPROTO_FIXTURE not set");

@@ -10,6 +10,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 
 	"github.com/hashicorp/terraform-plugin-go/tfprotov6"
 	"github.com/hashicorp/terraform-plugin-go/tfprotov6/tf6server"
@@ -240,6 +241,31 @@ func (p *fixtureProvider) GetProviderSchema(context.Context, *tfprotov6.GetProvi
 					},
 				},
 			},
+			// Provider-computed attribute: the user supplies `value`;
+			// the fixture populates `id = "computed-" + value` at Plan
+			// time. Exercises new_state projection onto declared
+			// computed outputs.
+			"fx_computed": {
+				Version: 0,
+				Block: &tfprotov6.SchemaBlock{
+					Attributes: []*tfprotov6.SchemaAttribute{
+						{
+							Name:            "value",
+							Type:            tftypes.String,
+							Optional:        true,
+							Description:     "User input; echoed into id.",
+							DescriptionKind: tfprotov6.StringKindPlain,
+						},
+						{
+							Name:            "id",
+							Type:            tftypes.String,
+							Computed:        true,
+							Description:     "Provider-issued identifier.",
+							DescriptionKind: tfprotov6.StringKindPlain,
+						},
+					},
+				},
+			},
 			// List-nested block: zero or more `rule { … }`.
 			"fx_list_block": {
 				Version: 0,
@@ -355,13 +381,90 @@ func (p *fixtureProvider) ReadResource(context.Context, *tfprotov6.ReadResourceR
 	}, nil
 }
 
-// PlanResourceChange echoes the proposed state as the planned state.
-// A real provider would substitute defaults for unknown fields and
-// mark computed attributes; our fixture has neither.
+// PlanResourceChange usually echoes the proposed state. Resource types
+// that have computed attributes fill those in here so the projection
+// onto declared outputs on the nixops4 side has something to pick up.
+// Apply then just echoes what Plan settled on.
 func (p *fixtureProvider) PlanResourceChange(_ context.Context, req *tfprotov6.PlanResourceChangeRequest) (*tfprotov6.PlanResourceChangeResponse, error) {
+	planned := req.ProposedNewState
+	switch req.TypeName {
+	case "fx_computed":
+		enriched, err := planFxComputed(req.ProposedNewState)
+		if err != nil {
+			return &tfprotov6.PlanResourceChangeResponse{
+				Diagnostics: []*tfprotov6.Diagnostic{{
+					Severity: tfprotov6.DiagnosticSeverityError,
+					Summary:  "planFxComputed",
+					Detail:   err.Error(),
+				}},
+			}, nil
+		}
+		planned = enriched
+	case "fx_computed_block_attr":
+		enriched, err := planFxComputedBlockAttr(req.ProposedNewState)
+		if err != nil {
+			return &tfprotov6.PlanResourceChangeResponse{
+				Diagnostics: []*tfprotov6.Diagnostic{{
+					Severity: tfprotov6.DiagnosticSeverityError,
+					Summary:  "planFxComputedBlockAttr",
+					Detail:   err.Error(),
+				}},
+			}, nil
+		}
+		planned = enriched
+	}
 	return &tfprotov6.PlanResourceChangeResponse{
-		PlannedState: req.ProposedNewState,
+		PlannedState: planned,
 	}, nil
+}
+
+// planFxComputed injects a synthetic `id` into the planned state. On
+// destroy the proposed state is a JSON null; leave it untouched so the
+// existing destroy path (echo null → new_state null) still works.
+func planFxComputed(pns *tfprotov6.DynamicValue) (*tfprotov6.DynamicValue, error) {
+	if pns == nil || len(pns.JSON) == 0 {
+		return pns, nil
+	}
+	var m map[string]any
+	if err := json.Unmarshal(pns.JSON, &m); err != nil {
+		return nil, err
+	}
+	if m == nil {
+		return pns, nil
+	}
+	value, _ := m["value"].(string)
+	m["id"] = "computed-" + value
+	out, err := json.Marshal(m)
+	if err != nil {
+		return nil, err
+	}
+	return &tfprotov6.DynamicValue{JSON: out}, nil
+}
+
+// planFxComputedBlockAttr populates the computed `token` inside the
+// nested `settings` block. Exercises new_state projection through a
+// Single-nested block. When the user omits `settings`, leave the
+// block null so the destroy path stays untouched.
+func planFxComputedBlockAttr(pns *tfprotov6.DynamicValue) (*tfprotov6.DynamicValue, error) {
+	if pns == nil || len(pns.JSON) == 0 {
+		return pns, nil
+	}
+	var m map[string]any
+	if err := json.Unmarshal(pns.JSON, &m); err != nil {
+		return nil, err
+	}
+	if m == nil {
+		return pns, nil
+	}
+	if settings, ok := m["settings"].(map[string]any); ok && settings != nil {
+		endpoint, _ := settings["endpoint"].(string)
+		settings["token"] = "token-for-" + endpoint
+	}
+	out, err := json.Marshal(m)
+	if err != nil {
+		return nil, err
+	}
+	return &tfprotov6.DynamicValue{JSON: out}, nil
 }
 
 // ApplyResourceChange echoes the planned state as the new state.

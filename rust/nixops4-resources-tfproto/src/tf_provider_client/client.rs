@@ -208,8 +208,22 @@ fn dv(json: Vec<u8>) -> tfplugin6::DynamicValue {
     }
 }
 
-/// Turn error-severity diagnostics into an aggregated `Err`.
+/// Aggregate error-severity diagnostics into an `Err`; log warnings.
+///
+/// tfplugin providers use warnings for deprecation notices and non-
+/// fatal advisories. Losing them silently defeats the point. Nixops4
+/// captures the adapter's stderr, so writing there is enough to
+/// surface warnings to the user without needing a dedicated channel.
 fn check_diagnostics(diagnostics: &[tfplugin6::Diagnostic]) -> Result<()> {
+    for d in diagnostics {
+        if d.severity == tfplugin6::diagnostic::Severity::Warning as i32 {
+            if d.detail.is_empty() {
+                eprintln!("provider warning: {}", d.summary);
+            } else {
+                eprintln!("provider warning: {}: {}", d.summary, d.detail);
+            }
+        }
+    }
     let errors: Vec<String> = diagnostics
         .iter()
         .filter(|d| d.severity == tfplugin6::diagnostic::Severity::Error as i32)
