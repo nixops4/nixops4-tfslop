@@ -6,6 +6,7 @@
 //! is skipped rather than failing.
 
 use nixops4_resources_tfproto::{schema::ProviderSchema, tf_provider_client::ProviderClient};
+use std::os::unix::process::ExitStatusExt;
 
 fn fixture_path() -> Option<String> {
     std::env::var("NIXOPS4_TFPROTO_FIXTURE").ok()
@@ -142,6 +143,34 @@ async fn update_string_via_plan_apply() {
     client.shutdown().await.expect("clean shutdown");
 
     assert_eq!(new_state.json, br#"{"value":"after"}"#);
+}
+
+// #37: shutdown() previously SIGKILL'd the child immediately, robbing
+// any real provider of the chance to flush state, close connections,
+// or run signal handlers. A clean shutdown must go through the
+// tfplugin-native StopProvider RPC, then SIGTERM (go-plugin's
+// documented graceful-shutdown signal); SIGKILL is only escalation
+// of last resort.
+//
+// Observable proof: after clean shutdown against a well-behaved
+// fixture, the child's ExitStatus must NOT be a SIGKILL. It may be
+// exit(0) (if the provider installs a signal handler that exits
+// cleanly) or termination by SIGTERM (go-plugin's default). Either
+// is "graceful" — what we ruled out is "killed abruptly, no chance
+// to clean up."
+#[tokio::test]
+async fn shutdown_does_not_sigkill_a_healthy_child() {
+    let Some(path) = fixture_path() else {
+        eprintln!("skipping: NIXOPS4_TFPROTO_FIXTURE not set");
+        return;
+    };
+    let client = ProviderClient::launch(&path).await.expect("launch fixture");
+    let status = client.shutdown().await.expect("shutdown");
+    assert_ne!(
+        status.signal(),
+        Some(nix::sys::signal::Signal::SIGKILL as i32),
+        "healthy child should not be SIGKILL'd during shutdown; got {status:?}"
+    );
 }
 
 // #75: when the child process dies mid-RPC, tonic reports a generic

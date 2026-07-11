@@ -20,6 +20,11 @@ use super::handshake;
 const TF_PLUGIN_MAGIC_COOKIE_VALUE: &str =
     "d602bf8f470bc67ca7faa0386276bbdd4330efaf76d1a219cb4d6991ca9872b2";
 
+/// How long shutdown waits for the child to exit after StopProvider
+/// + channel close + SIGTERM before escalating to SIGKILL. Providers
+/// that need longer to flush state can be revisited when we see one.
+const SHUTDOWN_GRACE: Duration = Duration::from_secs(3);
+
 /// A live provider process and the gRPC channel talking to it.
 ///
 /// Dropping this struct does not kill the child process. Callers must
@@ -97,20 +102,45 @@ impl ProviderClient {
         })
     }
 
-    /// SIGKILL the provider and wait for it to exit.
+    /// Shut down the provider and return its exit status.
     ///
-    /// The channel is dropped first so the server observes EOF cleanly.
-    pub async fn shutdown(self) -> Result<()> {
+    /// Sequence:
+    /// 1. `StopProvider` RPC — best effort; asks the provider to abort
+    ///    in-flight work.
+    /// 2. Drop the gRPC channel — the server observes EOF.
+    /// 3. SIGTERM — the go-plugin framework treats this as the
+    ///    graceful-shutdown signal (unlike StopProvider, which only
+    ///    aborts in-flight ops).
+    /// 4. Wait up to `SHUTDOWN_GRACE` for the child to exit.
+    /// 5. SIGKILL as escalation of last resort.
+    pub async fn shutdown(self) -> Result<std::process::ExitStatus> {
+        let _ = self.stop_provider().await;
         drop(self.channel);
-        // A poisoned mutex here means we panicked while inspecting the
-        // child — the child is still ours to reap either way.
+
         let mut process = match self.process.into_inner() {
             Ok(p) => p,
             Err(poison) => poison.into_inner(),
         };
-        let _ = process.start_kill();
-        let _ = process.wait().await;
-        Ok(())
+
+        if let Some(pid) = process.id() {
+            // Errors here (ESRCH: process already gone) are expected
+            // when the child has already exited; nothing to do.
+            let _ = nix::sys::signal::kill(
+                nix::unistd::Pid::from_raw(pid as i32),
+                nix::sys::signal::Signal::SIGTERM,
+            );
+        }
+
+        match tokio::time::timeout(SHUTDOWN_GRACE, process.wait()).await {
+            Ok(result) => result.context("waiting for provider to exit"),
+            Err(_) => {
+                let _ = process.start_kill();
+                process
+                    .wait()
+                    .await
+                    .context("waiting for provider after SIGKILL escalation")
+            }
+        }
     }
 
     /// Wait briefly for the child to reap and, if it has exited,
@@ -162,6 +192,24 @@ impl ProviderClient {
         };
         check_diagnostics(&response.diagnostics)?;
         Ok(response)
+    }
+
+    /// Ask the provider to stop what it's doing. The tfplugin-native
+    /// signal for graceful shutdown; providers use it to abort
+    /// in-flight work, flush state, and close connections.
+    pub async fn stop_provider(&self) -> Result<()> {
+        let response = match self
+            .provider()
+            .stop_provider(tonic::Request::new(tfplugin6::stop_provider::Request {}))
+            .await
+        {
+            Ok(r) => r.into_inner(),
+            Err(e) => return Err(self.on_transport_error("StopProvider", e).await),
+        };
+        if !response.error.is_empty() {
+            bail!("{}", response.error);
+        }
+        Ok(())
     }
 
     /// Call `ConfigureProvider` with the given raw configuration bytes.

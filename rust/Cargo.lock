@@ -749,6 +749,7 @@ dependencies = [
  "anyhow",
  "clap",
  "hyper-util",
+ "nix",
  "nixops4-resource",
  "nixops4-resource-runner",
  "prost",
