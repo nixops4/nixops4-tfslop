@@ -355,6 +355,7 @@ impl ProviderClient {
             )
             .await?;
         check_diagnostics(&response.diagnostics)?;
+        check_deferred(response.deferred.as_ref(), "PlanResourceChange")?;
         Ok(response)
     }
 
@@ -384,6 +385,9 @@ impl ProviderClient {
             )
             .await?;
         check_diagnostics(&response.diagnostics)?;
+        // ApplyResourceChange.Response does not carry a `deferred`
+        // field in the vendored proto (v6.9); deferral is a
+        // planning-time concept only.
         Ok(response)
     }
 }
@@ -393,6 +397,35 @@ fn dv(json: Vec<u8>) -> tfplugin6::DynamicValue {
     tfplugin6::DynamicValue {
         msgpack: Vec::new(),
         json,
+    }
+}
+
+/// Bail when the provider returned a `Deferred` field on a response.
+///
+/// The adapter announces `deferral_allowed = false`, so a well-
+/// behaved SDK-based provider won't send one — the SDK converts a
+/// mismatched Deferred into an error diagnostic that `check_diagnostics`
+/// already handles. This is a defensive fallback for the wire-level
+/// case (a non-SDK provider, or a future SDK that drops the guard).
+fn check_deferred(deferred: Option<&tfplugin6::Deferred>, rpc: &str) -> Result<()> {
+    if let Some(d) = deferred {
+        bail!(
+            "{} returned a Deferred response ({:?}) but the adapter announced deferral_allowed = false",
+            rpc,
+            deferred_reason_name(d.reason)
+        );
+    }
+    Ok(())
+}
+
+fn deferred_reason_name(reason: i32) -> &'static str {
+    use tfplugin6::deferred::Reason;
+    match Reason::try_from(reason) {
+        Ok(Reason::Unknown) => "UNKNOWN",
+        Ok(Reason::ResourceConfigUnknown) => "RESOURCE_CONFIG_UNKNOWN",
+        Ok(Reason::ProviderConfigUnknown) => "PROVIDER_CONFIG_UNKNOWN",
+        Ok(Reason::AbsentPrereq) => "ABSENT_PREREQ",
+        Err(_) => "<unrecognised>",
     }
 }
 

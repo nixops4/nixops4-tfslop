@@ -277,6 +277,31 @@ func (p *fixtureProvider) GetProviderSchema(context.Context, *tfprotov6.GetProvi
 			// Blocks forever in its Plan handler. Exercises the
 			// adapter's per-RPC timeout.
 			"fx_hang_on_plan": {Version: 0, Block: &tfprotov6.SchemaBlock{}},
+			// Returns a Deferred response on Plan or Apply with a
+			// caller-specified reason. Exercises the adapter's
+			// surfacing of `Deferred` — providers can send it even
+			// when the client announced `deferral_allowed = false`.
+			"fx_defer": {
+				Version: 0,
+				Block: &tfprotov6.SchemaBlock{
+					Attributes: []*tfprotov6.SchemaAttribute{
+						{
+							Name:            "deferring_operation",
+							Type:            tftypes.String,
+							Required:        true,
+							Description:     `"plan" or "apply".`,
+							DescriptionKind: tfprotov6.StringKindPlain,
+						},
+						{
+							Name:            "reason",
+							Type:            tftypes.String,
+							Required:        true,
+							Description:     "One of RESOURCE_CONFIG_UNKNOWN, PROVIDER_CONFIG_UNKNOWN, ABSENT_PREREQ.",
+							DescriptionKind: tfprotov6.StringKindPlain,
+						},
+					},
+				},
+			},
 			// Plan handler errors unless the adapter announced
 			// ClientCapabilities.WriteOnlyAttributesAllowed. Real
 			// providers may silently drop or reject write-only
@@ -520,6 +545,15 @@ func (p *fixtureProvider) PlanResourceChange(_ context.Context, req *tfprotov6.P
 	if req.TypeName == "fx_hang_on_plan" {
 		select {}
 	}
+	// fx_defer: return a Deferred Plan response if the caller asked.
+	if req.TypeName == "fx_defer" {
+		if p, ok := parseDeferParams(req.ProposedNewState); ok && p.DeferringOperation == "plan" {
+			return &tfprotov6.PlanResourceChangeResponse{
+				PlannedState: req.ProposedNewState,
+				Deferred:     &tfprotov6.Deferred{Reason: parseDeferReason(p.Reason)},
+			}, nil
+		}
+	}
 	// Assert that the adapter honours write_only on prior_state.
 	if req.TypeName == "fx_write_only" && priorStateHasField(req.PriorState, "secret") {
 		return &tfprotov6.PlanResourceChangeResponse{
@@ -585,6 +619,39 @@ func parseDieParams(pns *tfprotov6.DynamicValue) (dieParams, bool) {
 		return dieParams{}, false
 	}
 	return p, true
+}
+
+// deferParams controls the fx_defer fixture: which RPC returns
+// Deferred, and with what reason.
+type deferParams struct {
+	DeferringOperation string `json:"deferring_operation"`
+	Reason             string `json:"reason"`
+}
+
+func parseDeferParams(pns *tfprotov6.DynamicValue) (deferParams, bool) {
+	if pns == nil || len(pns.JSON) == 0 {
+		return deferParams{}, false
+	}
+	var p deferParams
+	if err := json.Unmarshal(pns.JSON, &p); err != nil {
+		return deferParams{}, false
+	}
+	if p.DeferringOperation == "" {
+		return deferParams{}, false
+	}
+	return p, true
+}
+
+func parseDeferReason(s string) tfprotov6.DeferredReason {
+	switch s {
+	case "RESOURCE_CONFIG_UNKNOWN":
+		return tfprotov6.DeferredReasonResourceConfigUnknown
+	case "PROVIDER_CONFIG_UNKNOWN":
+		return tfprotov6.DeferredReasonProviderConfigUnknown
+	case "ABSENT_PREREQ":
+		return tfprotov6.DeferredReasonAbsentPrereq
+	}
+	return tfprotov6.DeferredReasonUnknown
 }
 
 // priorStateHasField reports whether the (JSON) prior_state contains

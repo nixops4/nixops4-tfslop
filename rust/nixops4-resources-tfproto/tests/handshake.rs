@@ -146,6 +146,57 @@ async fn update_string_via_plan_apply() {
     assert_eq!(new_state.json, br#"{"value":"after"}"#);
 }
 
+// #48: providers can return `Deferred` on Plan meaning "not enough
+// info yet." The multi-cycle retry semantics Terraform uses don't
+// apply here — nixops4 only calls Apply with a complete set of
+// inputs (Nix evaluation is finished before the adapter ever runs),
+// so there's nothing to be "resolved later." The adapter announces
+// `deferral_allowed = false`; a Deferred response is therefore a
+// protocol violation, and we must surface the reason
+// (RESOURCE_CONFIG_UNKNOWN, ABSENT_PREREQ, …), not silently proceed.
+//
+// The observable path under the SDK fixture: tf6server sees a
+// Deferred response combined with our `deferral_allowed = false` and
+// converts it to an Error diagnostic naming the reason, which
+// `check_diagnostics` already surfaces. The adapter also has a
+// defensive check on the raw `deferred` field for wire-level cases
+// where the SDK guard doesn't fire.
+//
+// Two reasons are probed so a hardcoded string in the adapter's
+// output can't satisfy both.
+//
+// Apply-side Deferred is not exercised: the vendored proto (v6.9)
+// does not include `deferred` on ApplyResourceChange.Response.
+#[tokio::test]
+async fn deferred_response_surfaces_reason() {
+    let Some(path) = fixture_path() else {
+        eprintln!("skipping: NIXOPS4_TFPROTO_FIXTURE not set");
+        return;
+    };
+
+    for reason in ["RESOURCE_CONFIG_UNKNOWN", "ABSENT_PREREQ"] {
+        let client = ProviderClient::launch(&path).await.expect("launch fixture");
+        client
+            .configure_provider(b"null".to_vec())
+            .await
+            .expect("configure fixture");
+
+        let inputs =
+            format!(r#"{{"deferring_operation":"plan","reason":"{reason}"}}"#).into_bytes();
+        let result = client
+            .plan_resource_change("fx_defer", b"null".to_vec(), inputs.clone(), inputs)
+            .await;
+        let _ = client.shutdown().await;
+
+        let err = result.expect_err("Deferred Plan must surface as an error");
+        let chain = format!("{err:#}");
+        assert!(
+            chain.contains(reason),
+            "error should name the Deferred reason {reason}; got: {chain}"
+        );
+    }
+}
+
 // #47: the adapter must announce its capabilities on every request.
 // Without `write_only_attributes_allowed` a real provider may
 // silently drop write-only attributes or reject the request. The
