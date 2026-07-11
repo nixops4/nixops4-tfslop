@@ -103,6 +103,23 @@ func (p *fixtureProvider) GetProviderSchema(context.Context, *tfprotov6.GetProvi
 					},
 				},
 			},
+			// cty `map(T)` attribute: dynamic string keys, uniform
+			// value type. The `tags = { … }` pattern most providers
+			// expose.
+			"fx_map_string": {
+				Version: 0,
+				Block: &tfprotov6.SchemaBlock{
+					Attributes: []*tfprotov6.SchemaAttribute{
+						{
+							Name:            "value",
+							Type:            tftypes.Map{ElementType: tftypes.String},
+							Required:        true,
+							Description:     "A required map of strings.",
+							DescriptionKind: tfprotov6.StringKindPlain,
+						},
+					},
+				},
+			},
 			// cty `object` attribute: the value is a fixed-shape
 			// struct. Distinct from a nested block — the whole value
 			// is atomic (one required/computed/write_only bit for the

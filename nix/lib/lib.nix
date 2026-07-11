@@ -39,6 +39,10 @@ let
       types.int
     else if builtins.isList parsed && builtins.length parsed == 2 && builtins.head parsed == "list" then
       types.listOf (ctyParsedToOptionType (builtins.elemAt parsed 1))
+    # cty `map(T)`: dynamic string keys, uniform value type. Maps to
+    # `attrsOf` — the same "arbitrary keys" nix concept.
+    else if builtins.isList parsed && builtins.length parsed == 2 && builtins.head parsed == "map" then
+      types.attrsOf (ctyParsedToOptionType (builtins.elemAt parsed 1))
     # cty `object` type: the attribute's *value* is a fixed-shape
     # struct. The wire encoding is `["object", {field: type, …}]`.
     # Structurally the same target as a Single-nesting block minus

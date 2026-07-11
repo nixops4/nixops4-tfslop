@@ -59,6 +59,22 @@ let
     (lib.evalModules {
       modules = [ cfg.resourceTypes.fx_object.inputs ];
     }).options;
+  fxMapStringInputOptions =
+    (lib.evalModules {
+      modules = [ cfg.resourceTypes.fx_map_string.inputs ];
+    }).options;
+  materialisedMap =
+    (lib.evalModules {
+      modules = [
+        cfg.resourceTypes.fx_map_string.inputs
+        {
+          value = {
+            env = "prod";
+            team = "platform";
+          };
+        }
+      ];
+    }).config;
   # Materialisation: a valid object value must round-trip through the
   # option system without triggering type errors.
   materialisedObject =
@@ -283,6 +299,26 @@ in
     expected = {
       endpoint = "https://example.invalid";
       port = 443;
+    };
+  };
+
+  # cty `map(T)` attribute → `types.attrsOf T`.
+
+  "test map-of-string attribute becomes types.attrsOf" = {
+    expr = fxMapStringInputOptions.value.type.name;
+    expected = "attrsOf";
+  };
+
+  "test map-of-string element type is types.str" = {
+    expr = fxMapStringInputOptions.value.type.functor.payload.elemType.name;
+    expected = "str";
+  };
+
+  "test map-of-string value round-trips through option" = {
+    expr = materialisedMap.value;
+    expected = {
+      env = "prod";
+      team = "platform";
     };
   };
 
