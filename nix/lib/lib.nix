@@ -39,6 +39,25 @@ let
       types.int
     else if builtins.isList parsed && builtins.length parsed == 2 && builtins.head parsed == "list" then
       types.listOf (ctyParsedToOptionType (builtins.elemAt parsed 1))
+    # cty `object` type: the attribute's *value* is a fixed-shape
+    # struct. The wire encoding is `["object", {field: type, …}]`.
+    # Structurally the same target as a Single-nesting block minus
+    # the nullability wrapper — one attribute entry, one atomic
+    # value, but named sub-fields at declared types.
+    else if
+      builtins.isList parsed && builtins.length parsed == 2 && builtins.head parsed == "object"
+    then
+      let
+        fields = builtins.elemAt parsed 1;
+      in
+      types.submodule {
+        options = lib.mapAttrs (
+          _name: fieldType:
+          mkOption {
+            type = ctyParsedToOptionType fieldType;
+          }
+        ) fields;
+      }
     else
       throw "tfCommonSchemaToModule: unsupported cty type ${builtins.toJSON parsed}";
 

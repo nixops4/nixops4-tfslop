@@ -103,6 +103,30 @@ func (p *fixtureProvider) GetProviderSchema(context.Context, *tfprotov6.GetProvi
 					},
 				},
 			},
+			// cty `object` attribute: the value is a fixed-shape
+			// struct. Distinct from a nested block — the whole value
+			// is atomic (one required/computed/write_only bit for the
+			// whole thing), no nesting cardinality. Real providers
+			// use this heavily for structured attributes.
+			"fx_object": {
+				Version: 0,
+				Block: &tfprotov6.SchemaBlock{
+					Attributes: []*tfprotov6.SchemaAttribute{
+						{
+							Name: "settings",
+							Type: tftypes.Object{
+								AttributeTypes: map[string]tftypes.Type{
+									"endpoint": tftypes.String,
+									"port":     tftypes.Number,
+								},
+							},
+							Required:        true,
+							Description:     "A required object attribute.",
+							DescriptionKind: tfprotov6.StringKindPlain,
+						},
+					},
+				},
+			},
 			// Single-nested block: at most one `settings { … }`.
 			"fx_single_block": {
 				Version: 0,

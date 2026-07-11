@@ -55,6 +55,24 @@ let
     (lib.evalModules {
       modules = [ cfg.resourceTypes.fx_list_string.inputs ];
     }).options;
+  fxObjectInputOptions =
+    (lib.evalModules {
+      modules = [ cfg.resourceTypes.fx_object.inputs ];
+    }).options;
+  # Materialisation: a valid object value must round-trip through the
+  # option system without triggering type errors.
+  materialisedObject =
+    (lib.evalModules {
+      modules = [
+        cfg.resourceTypes.fx_object.inputs
+        {
+          settings = {
+            endpoint = "https://example.invalid";
+            port = 443;
+          };
+        }
+      ];
+    }).config;
   fxSingleBlockInputOptions =
     (lib.evalModules {
       modules = [ cfg.resourceTypes.fx_single_block.inputs ];
@@ -234,6 +252,38 @@ in
   "test list-of-string description comes from schema" = {
     expr = fxListStringInputOptions.value.description;
     expected = "A required list of strings. Echoed back on create.";
+  };
+
+  # cty `object` attribute → submodule with typed sub-options. The
+  # whole value is atomic on the schema side (one attribute entry, one
+  # set of flags), but its interior shape is fixed at schema time.
+
+  "test object attribute becomes types.submodule" = {
+    expr = fxObjectInputOptions.settings.type.name;
+    expected = "submodule";
+  };
+
+  "test object attribute exposes typed sub-options" = {
+    expr =
+      let
+        sub = fxObjectInputOptions.settings.type.getSubOptions [ ];
+      in
+      {
+        endpoint = sub.endpoint.type.name;
+        port = sub.port.type.name;
+      };
+    expected = {
+      endpoint = "str";
+      port = "int";
+    };
+  };
+
+  "test object attribute value round-trips through option" = {
+    expr = materialisedObject.settings;
+    expected = {
+      endpoint = "https://example.invalid";
+      port = 443;
+    };
   };
 
   # Nested blocks. A Single-nesting block becomes `nullOr submodule` so
