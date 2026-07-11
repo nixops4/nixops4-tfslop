@@ -183,6 +183,54 @@ async fn create_fx_computed_block_projects_nested_token() {
 }
 
 #[tokio::test]
+async fn update_fx_write_only_strips_secret_from_prior_state() {
+    let Some(fixture) = fixture_path() else {
+        eprintln!("skipping: NIXOPS4_TFPROTO_FIXTURE not set");
+        return;
+    };
+
+    let mut client = ResourceProviderClient::new(ResourceProviderConfig {
+        provider_executable: ADAPTER.to_string(),
+        provider_args: vec!["run".to_string(), "--provider-exe".to_string(), fixture],
+    })
+    .await
+    .expect("spawn adapter");
+
+    // Simulate a resource that was previously created with both `value`
+    // and `secret`. If nixops4 accidentally persisted the secret and
+    // the adapter fed it back in prior_state, the fixture Plan errors.
+    let mut previous_inputs = Map::new();
+    previous_inputs.insert("value".to_string(), Value::String("v0".to_string()));
+    previous_inputs.insert(
+        "secret".to_string(),
+        Value::String("previous-secret".to_string()),
+    );
+    let previous_outputs = Map::new();
+
+    let mut new_inputs = Map::new();
+    new_inputs.insert("value".to_string(), Value::String("v1".to_string()));
+    new_inputs.insert(
+        "secret".to_string(),
+        Value::String("new-secret".to_string()),
+    );
+
+    // A successful call proves the adapter stripped `secret` from
+    // prior_state before sending it to the provider. A failure here
+    // means the guard regressed.
+    let _ = client
+        .update(
+            "fx_write_only",
+            &new_inputs,
+            &previous_inputs,
+            &previous_outputs,
+        )
+        .await
+        .expect("update fx_write_only");
+
+    client.close_wait().await.expect("close adapter");
+}
+
+#[tokio::test]
 async fn destroy_fx_string_via_nixops4_protocol() {
     let Some(fixture) = fixture_path() else {
         eprintln!("skipping: NIXOPS4_TFPROTO_FIXTURE not set");

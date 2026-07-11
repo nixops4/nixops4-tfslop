@@ -7,8 +7,17 @@ use nixops4_resource::schema::v0;
 use serde_json::{Map, Value};
 
 use crate::outputs::project_new_state;
+use crate::prior_state::build_prior_state_json;
 use crate::schema::ProviderSchema;
 use crate::tf_provider_client::ProviderClient;
+
+/// Prior state supplied by the caller. `None` marks a create; the
+/// schema-aware reconstruction happens after the schema is fetched
+/// inside `plan_and_apply_inner`.
+struct PriorState {
+    inputs: Map<String, Value>,
+    outputs: Option<Map<String, Value>>,
+}
 
 pub struct TfPluginProvider {
     /// Path to the tfplugin provider binary this adapter drives.
@@ -28,9 +37,7 @@ impl ResourceProvider for TfPluginProvider {
     ) -> Result<v0::CreateResourceResponse> {
         let type_name = request.type_.0.clone();
         let inputs_json = properties_to_cty_json(request.input_properties.0)?;
-        let outputs = self
-            .plan_and_apply(&type_name, b"null".to_vec(), inputs_json)
-            .await?;
+        let outputs = self.plan_and_apply(&type_name, None, inputs_json).await?;
         Ok(v0::CreateResourceResponse {
             output_properties: outputs,
         })
@@ -42,12 +49,12 @@ impl ResourceProvider for TfPluginProvider {
     ) -> Result<v0::UpdateResourceResponse> {
         let type_name = request.resource.type_.0.clone();
         let new_inputs_json = properties_to_cty_json(request.input_properties.0)?;
-        let prior_state_json = extant_to_prior_state_json(
-            request.resource.input_properties.0,
-            request.resource.output_properties.map(|op| op.0),
-        )?;
+        let prior = PriorState {
+            inputs: request.resource.input_properties.0,
+            outputs: request.resource.output_properties.map(|op| op.0),
+        };
         let outputs = self
-            .plan_and_apply(&type_name, prior_state_json, new_inputs_json)
+            .plan_and_apply(&type_name, Some(prior), new_inputs_json)
             .await?;
         Ok(v0::UpdateResourceResponse {
             output_properties: outputs,
@@ -59,17 +66,17 @@ impl ResourceProvider for TfPluginProvider {
         request: v0::DestroyResourceRequest,
     ) -> Result<v0::DestroyResourceResponse> {
         let type_name = request.resource.type_.0.clone();
-        let prior_state_json = extant_to_prior_state_json(
-            request.resource.input_properties.0,
-            request.resource.output_properties.map(|op| op.0),
-        )?;
+        let prior = PriorState {
+            inputs: request.resource.input_properties.0,
+            outputs: request.resource.output_properties.map(|op| op.0),
+        };
         // A tfplugin destroy is Plan + Apply with `proposed_new_state`
         // = `planned_state` = `config` = cty null. The provider echoes
         // that null through to `new_state`, and any output properties
         // the provider might have returned are discarded — nixops4
         // will drop the resource from state.
         let _ = self
-            .plan_and_apply(&type_name, prior_state_json, b"null".to_vec())
+            .plan_and_apply(&type_name, Some(prior), b"null".to_vec())
             .await?;
         Ok(v0::DestroyResourceResponse {})
     }
@@ -82,11 +89,11 @@ impl TfPluginProvider {
     async fn plan_and_apply(
         &self,
         type_name: &str,
-        prior_state_json: Vec<u8>,
+        prior: Option<PriorState>,
         inputs_json: Vec<u8>,
     ) -> Result<v0::OutputProperties> {
         let client = ProviderClient::launch(&self.provider_exe).await?;
-        let result = plan_and_apply_inner(&client, type_name, prior_state_json, inputs_json).await;
+        let result = plan_and_apply_inner(&client, type_name, prior, inputs_json).await;
         client.shutdown().await?;
         result
     }
@@ -95,14 +102,20 @@ impl TfPluginProvider {
 async fn plan_and_apply_inner(
     client: &ProviderClient,
     type_name: &str,
-    prior_state_json: Vec<u8>,
+    prior: Option<PriorState>,
     inputs_json: Vec<u8>,
 ) -> Result<v0::OutputProperties> {
-    // Schema is fetched once per adapter invocation. The projection of
-    // `new_state` onto declared computed outputs needs it — we cannot
-    // reliably tell computed attributes from user inputs without it.
+    // Schema is fetched once per adapter invocation. Both the
+    // projection of `new_state` onto declared computed outputs and
+    // the stripping of write_only attributes from `prior_state` need
+    // it — we cannot reliably identify either without the schema.
     let raw_schema = client.get_provider_schema().await?;
     let schema = ProviderSchema::from_wire(raw_schema)?;
+
+    let prior_state_json = match prior {
+        None => b"null".to_vec(),
+        Some(p) => build_prior_state_json(&schema, type_name, p.inputs, p.outputs)?,
+    };
 
     // The fixture takes no configuration. Real providers configured
     // through the resource `tf-provider-*` prefix mechanism land later
@@ -138,21 +151,4 @@ async fn plan_and_apply_inner(
 
 fn properties_to_cty_json(props: Map<String, Value>) -> Result<Vec<u8>> {
     serde_json::to_vec(&Value::Object(props)).context("serialising resource properties")
-}
-
-/// Build a full go-cty JSON prior_state from the split nixops4 view
-/// (`input_properties` + `output_properties`). If the provider reused
-/// an attribute name for a computed field, the newer (output) value
-/// wins — same order a provider would have merged them internally.
-fn extant_to_prior_state_json(
-    prev_inputs: Map<String, Value>,
-    prev_outputs: Option<Map<String, Value>>,
-) -> Result<Vec<u8>> {
-    let mut prior_map = prev_inputs;
-    if let Some(outputs) = prev_outputs {
-        for (k, v) in outputs {
-            prior_map.insert(k, v);
-        }
-    }
-    serde_json::to_vec(&Value::Object(prior_map)).context("serialising prior state")
 }

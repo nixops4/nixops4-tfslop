@@ -266,6 +266,31 @@ func (p *fixtureProvider) GetProviderSchema(context.Context, *tfprotov6.GetProvi
 					},
 				},
 			},
+			// Resource with a write_only attribute. `secret` must not
+			// appear in prior_state — the adapter is supposed to strip
+			// it. Fixture's Plan errors if it sees one.
+			"fx_write_only": {
+				Version: 0,
+				Block: &tfprotov6.SchemaBlock{
+					Attributes: []*tfprotov6.SchemaAttribute{
+						{
+							Name:            "value",
+							Type:            tftypes.String,
+							Optional:        true,
+							Description:     "Persistent user input.",
+							DescriptionKind: tfprotov6.StringKindPlain,
+						},
+						{
+							Name:            "secret",
+							Type:            tftypes.String,
+							Optional:        true,
+							WriteOnly:       true,
+							Description:     "Write-only secret; never persisted.",
+							DescriptionKind: tfprotov6.StringKindPlain,
+						},
+					},
+				},
+			},
 			// List-nested block with MinItems=2: fewer entries must
 			// fail before spawning the provider.
 			"fx_min_list_block": {
@@ -435,6 +460,16 @@ func (p *fixtureProvider) ReadResource(context.Context, *tfprotov6.ReadResourceR
 // onto declared outputs on the nixops4 side has something to pick up.
 // Apply then just echoes what Plan settled on.
 func (p *fixtureProvider) PlanResourceChange(_ context.Context, req *tfprotov6.PlanResourceChangeRequest) (*tfprotov6.PlanResourceChangeResponse, error) {
+	// Assert that the adapter honours write_only on prior_state.
+	if req.TypeName == "fx_write_only" && priorStateHasField(req.PriorState, "secret") {
+		return &tfprotov6.PlanResourceChangeResponse{
+			Diagnostics: []*tfprotov6.Diagnostic{{
+				Severity: tfprotov6.DiagnosticSeverityError,
+				Summary:  "prior_state.secret leaked",
+				Detail:   "write_only attribute must be stripped from prior_state by the adapter",
+			}},
+		}, nil
+	}
 	planned := req.ProposedNewState
 	switch req.TypeName {
 	case "fx_computed":
@@ -465,6 +500,21 @@ func (p *fixtureProvider) PlanResourceChange(_ context.Context, req *tfprotov6.P
 	return &tfprotov6.PlanResourceChangeResponse{
 		PlannedState: planned,
 	}, nil
+}
+
+// priorStateHasField reports whether the (JSON) prior_state contains
+// the named top-level key. Used by fixture asserts against the
+// adapter's stripping of write_only attributes.
+func priorStateHasField(pns *tfprotov6.DynamicValue, key string) bool {
+	if pns == nil || len(pns.JSON) == 0 {
+		return false
+	}
+	var m map[string]any
+	if err := json.Unmarshal(pns.JSON, &m); err != nil {
+		return false
+	}
+	_, ok := m[key]
+	return ok
 }
 
 // planFxComputed injects a synthetic `id` into the planned state. On

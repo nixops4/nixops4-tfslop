@@ -85,8 +85,17 @@ pub struct Attribute {
     pub required: bool,
     pub optional: bool,
     pub computed: bool,
+    /// tfplugin `write_only`: user supplies this attribute each run
+    /// (typically a secret or one-time token) and it must not be
+    /// persisted in state. Adapter strips it from `prior_state`.
+    #[serde(skip_serializing_if = "is_false", default)]
+    pub write_only: bool,
     #[serde(skip_serializing_if = "String::is_empty")]
     pub description: String,
+}
+
+fn is_false(b: &bool) -> bool {
+    !*b
 }
 
 /// go-cty JSON encoding of a type: a JSON string for primitives (`"string"`),
@@ -197,6 +206,7 @@ impl Attribute {
             required: a.required,
             optional: a.optional,
             computed: a.computed,
+            write_only: a.write_only,
             description: a.description,
         })
     }
