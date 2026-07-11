@@ -103,6 +103,23 @@ func (p *fixtureProvider) GetProviderSchema(context.Context, *tfprotov6.GetProvi
 					},
 				},
 			},
+			// cty `tuple` attribute: ordered, fixed-length,
+			// heterogeneous element types. Rare in real providers
+			// but part of the type surface.
+			"fx_tuple": {
+				Version: 0,
+				Block: &tfprotov6.SchemaBlock{
+					Attributes: []*tfprotov6.SchemaAttribute{
+						{
+							Name:            "value",
+							Type:            tftypes.Tuple{ElementTypes: []tftypes.Type{tftypes.String, tftypes.Number, tftypes.Bool}},
+							Required:        true,
+							Description:     "A required (string, number, bool) tuple.",
+							DescriptionKind: tfprotov6.StringKindPlain,
+						},
+					},
+				},
+			},
 			// cty `set(T)` attribute: unordered, unique-valued
 			// collection. On the wire it's shaped like a list; the
 			// semantic difference lives in the type tag.

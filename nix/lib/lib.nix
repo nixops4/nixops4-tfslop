@@ -50,6 +50,15 @@ let
     # equivalent configs happen to serialise differently.
     else if builtins.isList parsed && builtins.length parsed == 2 && builtins.head parsed == "set" then
       types.listOf (ctyParsedToOptionType (builtins.elemAt parsed 1))
+    # cty `tuple`: ordered, fixed-length, heterogeneous element
+    # types. nixpkgs has no natural heterogeneous-list type, so
+    # translate to `types.listOf types.raw`; per-position type
+    # enforcement happens on the provider side at Plan. Length is
+    # asserted at apply time.
+    else if
+      builtins.isList parsed && builtins.length parsed == 2 && builtins.head parsed == "tuple"
+    then
+      types.listOf types.raw
     # cty `object` type: the attribute's *value* is a fixed-shape
     # struct. The wire encoding is `["object", {field: type, …}]`.
     # Structurally the same target as a Single-nesting block minus
@@ -79,10 +88,45 @@ let
   ctyIsSet =
     parsed: builtins.isList parsed && builtins.length parsed == 2 && builtins.head parsed == "set";
 
+  # Fixed length of a cty tuple, or null if the parsed type isn't a
+  # tuple. Used to attach a length-assertion `apply` on options whose
+  # value is a tuple.
+  ctyTupleLength =
+    parsed:
+    if builtins.isList parsed && builtins.length parsed == 2 && builtins.head parsed == "tuple" then
+      builtins.length (builtins.elemAt parsed 1)
+    else
+      null;
+
+  # Compose the option-level `apply` (dedup / length-check / passthrough)
+  # implied by the parsed cty type. Only one applies for a given
+  # attribute, so a simple if/else on the type kind is enough.
+  ctyApplyForType =
+    name: parsed:
+    if ctyIsSet parsed then
+      { apply = lib.unique; }
+    else if ctyTupleLength parsed != null then
+      let
+        expected = ctyTupleLength parsed;
+      in
+      {
+        apply =
+          v:
+          let
+            got = builtins.length v;
+          in
+          if got != expected then
+            throw "attribute ${name}: tuple length ${toString expected} required, got ${toString got}"
+          else
+            v;
+      }
+    else
+      { };
+
   convertInputAttributes =
     attrs:
     lib.mapAttrs (
-      _name: attr:
+      name: attr:
       let
         parsed = builtins.fromJSON attr.type;
       in
@@ -91,14 +135,14 @@ let
           type = ctyParsedToOptionType parsed;
           description = if attr.description or "" != "" then attr.description else "Terraform input";
         }
-        // lib.optionalAttrs (ctyIsSet parsed) { apply = lib.unique; }
+        // ctyApplyForType name parsed
       )
     ) (lib.filterAttrs (_: attr: attr.required or false || attr.optional or false) attrs);
 
   convertOutputAttributes =
     attrs:
     lib.mapAttrs (
-      _name: attr:
+      name: attr:
       let
         parsed = builtins.fromJSON attr.type;
       in
@@ -108,7 +152,7 @@ let
           description = if attr.description or "" != "" then attr.description else "Terraform output";
           readOnly = true;
         }
-        // lib.optionalAttrs (ctyIsSet parsed) { apply = lib.unique; }
+        // ctyApplyForType name parsed
       )
     ) (lib.filterAttrs (_: attr: attr.computed or false) attrs);
 

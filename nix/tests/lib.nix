@@ -67,6 +67,35 @@ let
     (lib.evalModules {
       modules = [ cfg.resourceTypes.fx_set_string.inputs ];
     }).options;
+  fxTupleInputOptions =
+    (lib.evalModules {
+      modules = [ cfg.resourceTypes.fx_tuple.inputs ];
+    }).options;
+  materialisedTuple =
+    (lib.evalModules {
+      modules = [
+        cfg.resourceTypes.fx_tuple.inputs
+        {
+          value = [
+            "hi"
+            42
+            true
+          ];
+        }
+      ];
+    }).config;
+  tryEvalTupleLength =
+    n:
+    builtins.tryEval (
+      (lib.evalModules {
+        modules = [
+          cfg.resourceTypes.fx_tuple.inputs
+          {
+            value = builtins.genList (i: "elem${toString i}") n;
+          }
+        ];
+      }).config.value
+    );
   # Feed a list with duplicates: the apply-time dedup must canonicalise
   # it so the on-wire value doesn't carry noise into state diffs.
   materialisedSet =
@@ -361,6 +390,29 @@ in
       "a"
       "b"
     ];
+  };
+
+  # cty `tuple` attribute → listOf raw with length check. Per-position
+  # types are not enforced at the option level (nixpkgs has no natural
+  # heterogeneous-list type); the provider validates on Plan.
+
+  "test tuple attribute becomes types.listOf" = {
+    expr = fxTupleInputOptions.value.type.name;
+    expected = "listOf";
+  };
+
+  "test tuple value at declared length round-trips" = {
+    expr = materialisedTuple.value;
+    expected = [
+      "hi"
+      42
+      true
+    ];
+  };
+
+  "test tuple with wrong length fails" = {
+    expr = (tryEvalTupleLength 2).success;
+    expected = false;
   };
 
   # Nested blocks. A Single-nesting block becomes `nullOr submodule` so
