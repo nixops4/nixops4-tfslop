@@ -402,11 +402,16 @@ fn dv(json: Vec<u8>) -> tfplugin6::DynamicValue {
 
 /// Bail when the provider returned a `Deferred` field on a response.
 ///
-/// The adapter announces `deferral_allowed = false`, so a well-
-/// behaved SDK-based provider won't send one — the SDK converts a
-/// mismatched Deferred into an error diagnostic that `check_diagnostics`
-/// already handles. This is a defensive fallback for the wire-level
-/// case (a non-SDK provider, or a future SDK that drops the guard).
+/// Nix evaluation completes before the adapter runs, so the config
+/// reaching Plan is already the complete set — there's nothing that
+/// could be "resolved later." The adapter announces
+/// `deferral_allowed = false` to match.
+///
+/// A well-behaved SDK-based provider won't send Deferred to us — the
+/// SDK converts a mismatched Deferred into an error diagnostic that
+/// `check_diagnostics` already handles. This function is the wire-
+/// level fallback for a non-SDK provider (or a future SDK that drops
+/// the guard).
 fn check_deferred(deferred: Option<&tfplugin6::Deferred>, rpc: &str) -> Result<()> {
     if let Some(d) = deferred {
         bail!(

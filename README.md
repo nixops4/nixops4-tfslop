@@ -33,6 +33,25 @@ and `terraform plan -refresh-only` matches the separate reconciliation
 operation. The difference is that here it's the default posture rather than
 opt-out — deployment is a distinct workflow from drift monitoring.
 
+## Deferred plans don't apply
+
+The tfplugin protocol lets providers return `Deferred` on
+`PlanResourceChange` — "not enough info to decide yet." Terraform's
+multi-cycle planner uses that: resources with unknown inputs are held out
+of the current apply set and re-planned once their dependencies' outputs
+land.
+
+NixOps4 has no such planner. Nix evaluation completes before the adapter
+runs, so the config passed to Plan is already the complete set — there
+are no unknowns that could be "resolved later." The adapter announces
+`ClientCapabilities.deferral_allowed = false` and rejects any Deferred
+response as a protocol violation, surfacing the reason to the user.
+
+The proto reflects the same invariant on the other side: only Plan can
+be Deferred; `ApplyResourceChange.Response` has no `deferred` field at
+all, because Apply-on-Deferred-Plan is out of contract by design. Apply
+is either fully committed or errored — never partial.
+
 ## What this repo contains
 
 - `rust/nixops4-resources-tfproto/` — the adapter binary (Rust). Speaks the
