@@ -27,17 +27,42 @@ pub fn project_new_state(
     let state: Value = serde_json::from_slice(new_state_json)
         .with_context(|| format!("parsing new_state for {} as JSON", type_name))?;
     let mut out = Map::new();
-    project_block(&resource.block, &state, &mut out)
-        .with_context(|| format!("projecting new_state for {}", type_name))?;
+    // The path starts at the resource type name so deep failures
+    // read as `fx_thing.settings.token: …` — the same dotted form a
+    // user sees in their Nix config.
+    project_block(&resource.block, &state, &mut out, type_name)?;
     Ok(out)
 }
 
-fn project_block(block: &Block, state: &Value, out: &mut Map<String, Value>) -> Result<()> {
+/// Human-readable name for a JSON value's shape. Used in error
+/// messages instead of `{:?}` which prints Rust Debug syntax
+/// (`String("hello")`, `Number(42)`) and leaks the internal type.
+fn json_kind(v: &Value) -> &'static str {
+    match v {
+        Value::Null => "null",
+        Value::Bool(_) => "boolean",
+        Value::Number(_) => "number",
+        Value::String(_) => "string",
+        Value::Array(_) => "array",
+        Value::Object(_) => "object",
+    }
+}
+
+fn project_block(
+    block: &Block,
+    state: &Value,
+    out: &mut Map<String, Value>,
+    path: &str,
+) -> Result<()> {
     let state_obj = match state {
         Value::Object(m) => m,
         // A null block instance carries no computed values.
         Value::Null => return Ok(()),
-        other => bail!("expected object or null in new_state, got {:?}", other),
+        other => bail!(
+            "{}: expected object or null in new_state, got {}",
+            path,
+            json_kind(other)
+        ),
     };
     for (name, attr) in &block.attributes {
         if !attr.computed {
@@ -51,19 +76,20 @@ fn project_block(block: &Block, state: &Value, out: &mut Map<String, Value>) -> 
         if !block_has_computed(&bt.block) {
             continue;
         }
-        let projected = project_block_type(bt, state_obj.get(name))?;
+        let child_path = format!("{}.{}", path, name);
+        let projected = project_block_type(bt, state_obj.get(name), &child_path)?;
         out.insert(name.clone(), projected);
     }
     Ok(())
 }
 
-fn project_block_type(bt: &BlockType, state: Option<&Value>) -> Result<Value> {
+fn project_block_type(bt: &BlockType, state: Option<&Value>, path: &str) -> Result<Value> {
     match &bt.nesting {
         NestingMode::Single => match state {
             None | Some(Value::Null) => Ok(Value::Null),
             Some(v) => {
                 let mut inner = Map::new();
-                project_block(&bt.block, v, &mut inner)?;
+                project_block(&bt.block, v, &mut inner, path)?;
                 Ok(Value::Object(inner))
             }
         },
@@ -73,16 +99,18 @@ fn project_block_type(bt: &BlockType, state: Option<&Value>) -> Result<Value> {
                 .cloned()
                 .unwrap_or_default();
             let mut items = Vec::with_capacity(arr.len());
-            for elem in &arr {
+            for (i, elem) in arr.iter().enumerate() {
                 let mut inner = Map::new();
-                project_block(&bt.block, elem, &mut inner)?;
+                let elem_path = format!("{}[{}]", path, i);
+                project_block(&bt.block, elem, &mut inner, &elem_path)?;
                 items.push(Value::Object(inner));
             }
             Ok(Value::Array(items))
         }
         NestingMode::Unsupported(mode) => {
             bail!(
-                "cannot project new_state through unsupported nesting mode {}",
+                "{}: cannot project new_state through unsupported nesting mode {}",
+                path,
                 mode
             )
         }
@@ -95,4 +123,103 @@ pub(crate) fn block_has_computed(block: &Block) -> bool {
             .block_types
             .values()
             .any(|bt| block_has_computed(&bt.block))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::schema::{Attribute, ResourceSchema};
+    use std::collections::BTreeMap;
+
+    fn attr(cty_type: &str, computed: bool) -> Attribute {
+        Attribute {
+            cty_type: cty_type.to_string(),
+            required: false,
+            optional: false,
+            computed,
+            write_only: false,
+            description: String::new(),
+        }
+    }
+
+    fn block_with_settings_containing_token() -> Block {
+        let mut inner_attrs = BTreeMap::new();
+        inner_attrs.insert("token".to_string(), attr("\"string\"", true));
+        let inner = Block {
+            attributes: inner_attrs,
+            block_types: BTreeMap::new(),
+        };
+        let mut block_types = BTreeMap::new();
+        block_types.insert(
+            "settings".to_string(),
+            BlockType {
+                nesting: NestingMode::Single,
+                min_items: 0,
+                max_items: 0,
+                block: inner,
+            },
+        );
+        Block {
+            attributes: BTreeMap::new(),
+            block_types,
+        }
+    }
+
+    fn schema_with(type_name: &str, block: Block) -> ProviderSchema {
+        let mut rs = BTreeMap::new();
+        rs.insert(type_name.to_string(), ResourceSchema { block });
+        ProviderSchema {
+            resource_schemas: rs,
+            data_source_schemas: BTreeMap::new(),
+        }
+    }
+
+    // #74: projection errors must point at the attribute path they
+    // failed on. The walker knows the path; not surfacing it makes
+    // deep failures unactionable ("expected object, got Number" —
+    // *where* though?).
+    #[test]
+    fn error_names_the_failing_path() {
+        let schema = schema_with("fx_thing", block_with_settings_containing_token());
+        // `settings` should be an object, but we feed a number instead.
+        let new_state = br#"{"settings": 42}"#;
+        let err = project_new_state(&schema, "fx_thing", new_state).unwrap_err();
+        let chain = format!("{err:#}");
+        assert!(
+            chain.contains("fx_thing.settings"),
+            "error should name the failing path fx_thing.settings; got: {chain}"
+        );
+    }
+
+    // #76: user-facing errors must not use Rust's Debug format for
+    // serde_json values. `Number(42)` and `String("hello")` leak the
+    // Rust representation into the error message.
+    #[test]
+    fn error_does_not_use_debug_format_for_json_values() {
+        let schema = schema_with("fx_thing", block_with_settings_containing_token());
+        let new_state = br#"{"settings": 42}"#;
+        let err = project_new_state(&schema, "fx_thing", new_state).unwrap_err();
+        let chain = format!("{err:#}");
+        for rust_debug_marker in ["Number(", "String(", "Bool(", "Array(", "Object("] {
+            assert!(
+                !chain.contains(rust_debug_marker),
+                "found Rust Debug marker {rust_debug_marker:?} in user-facing error: {chain}"
+            );
+        }
+    }
+
+    // Sanity: a well-formed input still projects cleanly.
+    #[test]
+    fn happy_path_still_projects() {
+        let schema = schema_with("fx_thing", block_with_settings_containing_token());
+        let new_state = br#"{"settings": {"token": "abc"}}"#;
+        let out = project_new_state(&schema, "fx_thing", new_state).unwrap();
+        assert_eq!(
+            out.get("settings")
+                .and_then(|v| v.as_object())
+                .and_then(|m| m.get("token"))
+                .and_then(|v| v.as_str()),
+            Some("abc")
+        );
+    }
 }
