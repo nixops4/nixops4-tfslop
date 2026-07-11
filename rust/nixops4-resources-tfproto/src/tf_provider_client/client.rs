@@ -21,6 +21,18 @@ use super::handshake;
 const TF_PLUGIN_MAGIC_COOKIE_VALUE: &str =
     "d602bf8f470bc67ca7faa0386276bbdd4330efaf76d1a219cb4d6991ca9872b2";
 
+/// The capabilities the adapter announces to providers. The Nix side
+/// strips write-only attributes from `prior_state`, so we say we
+/// handle them. Deferred responses are unimplemented (task #48), so
+/// we do NOT announce `deferral_allowed`: providers that see false
+/// stick to synchronous replies.
+fn announced_client_capabilities() -> tfplugin6::ClientCapabilities {
+    tfplugin6::ClientCapabilities {
+        deferral_allowed: false,
+        write_only_attributes_allowed: true,
+    }
+}
+
 /// How long shutdown waits for the child to exit after StopProvider
 /// + channel close + SIGTERM before escalating to SIGKILL. Providers
 /// that need longer to flush state can be revisited when we see one.
@@ -250,6 +262,31 @@ impl ProviderClient {
         Ok(response)
     }
 
+    /// Call `ValidateResourceConfig` on the provider. Surfaces bad
+    /// configs before Plan, and — because the tfplugin v6 SDK exposes
+    /// `WriteOnlyAttributesAllowed` on this RPC's `ClientCapabilities`
+    /// — is where we announce that capability. A real provider that
+    /// doesn't see it may silently drop or reject write-only inputs.
+    pub async fn validate_resource_config(
+        &self,
+        type_name: &str,
+        config_json: Vec<u8>,
+    ) -> Result<()> {
+        let req = tfplugin6::validate_resource_config::Request {
+            type_name: type_name.to_string(),
+            config: Some(dv(config_json)),
+            client_capabilities: Some(announced_client_capabilities()),
+        };
+        let response = self
+            .bounded_rpc(
+                "ValidateResourceConfig",
+                self.provider()
+                    .validate_resource_config(tonic::Request::new(req)),
+            )
+            .await?;
+        check_diagnostics(&response.diagnostics)
+    }
+
     /// Ask the provider to stop what it's doing. The tfplugin-native
     /// signal for graceful shutdown; providers use it to abort
     /// in-flight work, flush state, and close connections.
@@ -277,7 +314,7 @@ impl ProviderClient {
                 msgpack: Vec::new(),
                 json: config_json,
             }),
-            client_capabilities: None,
+            client_capabilities: Some(announced_client_capabilities()),
         };
         let response = self
             .bounded_rpc(
@@ -307,7 +344,7 @@ impl ProviderClient {
             config: Some(dv(config_json)),
             prior_private: Vec::new(),
             provider_meta: None,
-            client_capabilities: None,
+            client_capabilities: Some(announced_client_capabilities()),
             prior_identity: None,
         };
         let response = self

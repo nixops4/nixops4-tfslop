@@ -146,6 +146,33 @@ async fn update_string_via_plan_apply() {
     assert_eq!(new_state.json, br#"{"value":"after"}"#);
 }
 
+// #47: the adapter must announce its capabilities on every request.
+// Without `write_only_attributes_allowed` a real provider may
+// silently drop write-only attributes or reject the request. The
+// tfplugin v6 SDK surfaces this capability specifically on
+// ValidateResourceConfig, so that's where the fixture check lives.
+#[tokio::test]
+async fn validate_resource_config_announces_write_only_capability() {
+    let Some(path) = fixture_path() else {
+        eprintln!("skipping: NIXOPS4_TFPROTO_FIXTURE not set");
+        return;
+    };
+    let client = ProviderClient::launch(&path).await.expect("launch fixture");
+    client
+        .configure_provider(b"null".to_vec())
+        .await
+        .expect("configure fixture");
+
+    let result = client
+        .validate_resource_config("fx_check_write_only_capability", b"{}".to_vec())
+        .await;
+    let _ = client.shutdown().await;
+
+    result.expect(
+        "ValidateResourceConfig must succeed once the adapter announces write_only capability",
+    );
+}
+
 // #37 R2: an RPC against a hung provider must not hang the adapter.
 // Every RPC needs a bounded wait; blowing past it errors out so
 // `nixops4 apply` can surface it rather than freeze.

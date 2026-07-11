@@ -277,6 +277,11 @@ func (p *fixtureProvider) GetProviderSchema(context.Context, *tfprotov6.GetProvi
 			// Blocks forever in its Plan handler. Exercises the
 			// adapter's per-RPC timeout.
 			"fx_hang_on_plan": {Version: 0, Block: &tfprotov6.SchemaBlock{}},
+			// Plan handler errors unless the adapter announced
+			// ClientCapabilities.WriteOnlyAttributesAllowed. Real
+			// providers may silently drop or reject write-only
+			// attributes when the client doesn't announce support.
+			"fx_check_write_only_capability": {Version: 0, Block: &tfprotov6.SchemaBlock{}},
 			"fx_die": {
 				Version: 0,
 				Block: &tfprotov6.SchemaBlock{
@@ -469,9 +474,21 @@ func (p *fixtureProvider) DeleteState(context.Context, *tfprotov6.DeleteStateReq
 
 // --- ResourceServer ---
 
-// ValidateResourceConfig always succeeds: any input the tfplugin
-// framework already decoded to a DynamicValue is acceptable.
-func (p *fixtureProvider) ValidateResourceConfig(context.Context, *tfprotov6.ValidateResourceConfigRequest) (*tfprotov6.ValidateResourceConfigResponse, error) {
+// ValidateResourceConfig usually succeeds. fx_check_write_only_capability
+// requires the caller to have announced
+// `ClientCapabilities.WriteOnlyAttributesAllowed`; the SDK exposes that
+// capability on this RPC in v6, so it's where the check has to live.
+func (p *fixtureProvider) ValidateResourceConfig(_ context.Context, req *tfprotov6.ValidateResourceConfigRequest) (*tfprotov6.ValidateResourceConfigResponse, error) {
+	if req.TypeName == "fx_check_write_only_capability" {
+		if req.ClientCapabilities == nil || !req.ClientCapabilities.WriteOnlyAttributesAllowed {
+			return &tfprotov6.ValidateResourceConfigResponse{
+				Diagnostics: []*tfprotov6.Diagnostic{{
+					Severity: tfprotov6.DiagnosticSeverityError,
+					Summary:  "client did not announce write_only_attributes_allowed",
+				}},
+			}, nil
+		}
+	}
 	return &tfprotov6.ValidateResourceConfigResponse{}, nil
 }
 
