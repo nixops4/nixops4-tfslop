@@ -7,6 +7,7 @@
 
 use nixops4_resources_tfproto::{schema::ProviderSchema, tf_provider_client::ProviderClient};
 use std::os::unix::process::ExitStatusExt;
+use std::time::Duration;
 
 fn fixture_path() -> Option<String> {
     std::env::var("NIXOPS4_TFPROTO_FIXTURE").ok()
@@ -143,6 +144,37 @@ async fn update_string_via_plan_apply() {
     client.shutdown().await.expect("clean shutdown");
 
     assert_eq!(new_state.json, br#"{"value":"after"}"#);
+}
+
+// #37 R1: dropping a ProviderClient without calling shutdown must
+// not leak the child process. `shutdown()` is the graceful path;
+// `Drop` is the safety net for the panic / forgotten-call path.
+// A leaked child would linger until the test binary (or the
+// eventual `nixops4` process) exited — a real orphan.
+#[tokio::test]
+async fn drop_without_shutdown_kills_child() {
+    let Some(path) = fixture_path() else {
+        eprintln!("skipping: NIXOPS4_TFPROTO_FIXTURE not set");
+        return;
+    };
+    let client = ProviderClient::launch(&path).await.expect("launch fixture");
+    let pid = client.pid().expect("child pid available after launch");
+    drop(client);
+
+    // Poll `kill(pid, None)` (an existence probe): Ok while the
+    // process is alive, Err(ESRCH) when it's gone. A short deadline
+    // — Drop should be effectively immediate.
+    let nix_pid = nix::unistd::Pid::from_raw(pid as i32);
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(2);
+    loop {
+        if nix::sys::signal::kill(nix_pid, None).is_err() {
+            return;
+        }
+        if tokio::time::Instant::now() > deadline {
+            panic!("child pid {pid} still alive 2s after ProviderClient drop");
+        }
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
 }
 
 // #37: shutdown() previously SIGKILL'd the child immediately, robbing

@@ -48,7 +48,12 @@ impl ProviderClient {
             .env("PLUGIN_MIN_PORT", "12000")
             .env("PLUGIN_MAX_PORT", "13000")
             .stdout(Stdio::piped())
-            .stderr(Stdio::inherit());
+            .stderr(Stdio::inherit())
+            // Safety net for the panic / forgotten-shutdown path: on
+            // `Child::drop` tokio sends SIGKILL and reaps. Callers who
+            // want graceful cleanup still go through `shutdown()`; this
+            // just guarantees no orphan when they don't.
+            .kill_on_drop(true);
 
         let mut process = cmd
             .spawn()
@@ -100,6 +105,16 @@ impl ProviderClient {
             process: Mutex::new(process),
             channel,
         })
+    }
+
+    /// The child provider's OS PID, if the process is still tracked
+    /// by this client. Useful for tests that want to observe the
+    /// child's lifecycle without holding a `Child` handle.
+    pub fn pid(&self) -> Option<u32> {
+        match self.process.lock() {
+            Ok(g) => g.id(),
+            Err(poison) => poison.into_inner().id(),
+        }
     }
 
     /// Shut down the provider and return its exit status.
