@@ -318,11 +318,50 @@ fn check_diagnostics(diagnostics: &[tfplugin6::Diagnostic]) -> Result<()> {
 }
 
 fn format_diagnostic(d: &tfplugin6::Diagnostic) -> String {
-    if d.detail.is_empty() {
+    let body = if d.detail.is_empty() {
         d.summary.clone()
     } else {
         format!("{}: {}", d.summary, d.detail)
+    };
+    match d.attribute.as_ref().and_then(format_attribute_path) {
+        Some(path) => format!("at {}: {}", path, body),
+        None => body,
     }
+}
+
+/// Format a tfplugin `AttributePath` as a Nix-config-shaped string:
+/// `foo.bar[0].baz`, `tags["env"]`. Returns `None` for an empty path
+/// so an absent path doesn't produce a stray `at : ` prefix.
+fn format_attribute_path(p: &tfplugin6::AttributePath) -> Option<String> {
+    use tfplugin6::attribute_path::step::Selector;
+    if p.steps.is_empty() {
+        return None;
+    }
+    let mut out = String::new();
+    for (i, step) in p.steps.iter().enumerate() {
+        match &step.selector {
+            Some(Selector::AttributeName(name)) => {
+                if i > 0 {
+                    out.push('.');
+                }
+                out.push_str(name);
+            }
+            Some(Selector::ElementKeyInt(k)) => {
+                out.push_str(&format!("[{}]", k));
+            }
+            Some(Selector::ElementKeyString(k)) => {
+                // Escape embedded quotes so `tags["a\"b"]` stays parseable.
+                let escaped = k.replace('\\', r"\\").replace('"', r#"\""#);
+                out.push_str(&format!("[\"{}\"]", escaped));
+            }
+            None => {
+                // Malformed step from a provider — surface as `<?>`
+                // so we don't just silently drop it.
+                out.push_str("<?>");
+            }
+        }
+    }
+    Some(out)
 }
 
 #[cfg(test)]
@@ -412,6 +451,97 @@ mod tests {
         let result = check_diagnostics(&diagnostics);
         let msg = format!("{}", result.unwrap_err());
         assert_eq!(msg, "boom: detail");
+    }
+
+    fn attr_step(name: &str) -> tfplugin6::attribute_path::Step {
+        tfplugin6::attribute_path::Step {
+            selector: Some(tfplugin6::attribute_path::step::Selector::AttributeName(
+                name.to_string(),
+            )),
+        }
+    }
+
+    fn int_step(i: i64) -> tfplugin6::attribute_path::Step {
+        tfplugin6::attribute_path::Step {
+            selector: Some(tfplugin6::attribute_path::step::Selector::ElementKeyInt(i)),
+        }
+    }
+
+    fn string_step(k: &str) -> tfplugin6::attribute_path::Step {
+        tfplugin6::attribute_path::Step {
+            selector: Some(tfplugin6::attribute_path::step::Selector::ElementKeyString(
+                k.to_string(),
+            )),
+        }
+    }
+
+    fn diag_at(
+        sev: i32,
+        summary: &str,
+        steps: Vec<tfplugin6::attribute_path::Step>,
+    ) -> tfplugin6::Diagnostic {
+        tfplugin6::Diagnostic {
+            severity: sev,
+            summary: summary.to_string(),
+            detail: String::new(),
+            attribute: Some(tfplugin6::AttributePath { steps }),
+        }
+    }
+
+    // #49: `Diagnostic.attribute` names the config path an error is
+    // about (`settings.token`, `rules[0].name`, `tags["env"]`).
+    // Dropping it makes deep errors unactionable — the user knows
+    // *what* is wrong but not *where*.
+    #[test]
+    fn error_includes_attribute_path() {
+        let diagnostics = vec![diag_at(
+            Severity::Error as i32,
+            "value is malformed",
+            vec![attr_step("settings"), attr_step("token")],
+        )];
+        let result = check_diagnostics(&diagnostics);
+        let msg = format!("{}", result.unwrap_err());
+        assert!(
+            msg.contains("settings.token"),
+            "error should name the attribute path settings.token; got: {msg}"
+        );
+    }
+
+    #[test]
+    fn error_path_formats_list_index() {
+        let diagnostics = vec![diag_at(
+            Severity::Error as i32,
+            "invalid rule",
+            vec![attr_step("rules"), int_step(2), attr_step("name")],
+        )];
+        let msg = format!("{}", check_diagnostics(&diagnostics).unwrap_err());
+        assert!(
+            msg.contains("rules[2].name"),
+            "error should name path rules[2].name; got: {msg}"
+        );
+    }
+
+    #[test]
+    fn error_path_formats_string_key() {
+        let diagnostics = vec![diag_at(
+            Severity::Error as i32,
+            "bad tag",
+            vec![attr_step("tags"), string_step("env")],
+        )];
+        let msg = format!("{}", check_diagnostics(&diagnostics).unwrap_err());
+        assert!(
+            msg.contains(r#"tags["env"]"#),
+            r#"error should name path tags["env"]; got: {msg}"#
+        );
+    }
+
+    // A missing / empty attribute path must not produce noise like
+    // "at : summary".
+    #[test]
+    fn error_without_path_has_no_prefix_artifact() {
+        let diagnostics = vec![diag_at(Severity::Error as i32, "no path here", vec![])];
+        let msg = format!("{}", check_diagnostics(&diagnostics).unwrap_err());
+        assert_eq!(msg, "no path here");
     }
 
     #[test]
