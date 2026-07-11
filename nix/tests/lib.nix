@@ -101,6 +101,23 @@ let
         { id = "computed-nixops4"; }
       ];
     }).config;
+
+  # MinItems / MaxItems enforcement on List blocks — a bad length must
+  # fail at eval, before any provider is spawned.
+  tryEvalRuleCount =
+    typeName: n:
+    builtins.tryEval (
+      (lib.evalModules {
+        modules = [
+          cfg.resourceTypes.${typeName}.inputs
+          {
+            rule = builtins.genList (i: {
+              name = "r${toString i}";
+            }) n;
+          }
+        ];
+      }).config.rule
+    );
   # Sibling: same shape without a computed inner attribute. Confirms
   # that a block-with-no-computed-content is *absent* from outputs.
   fxSingleBlockOutputOptions =
@@ -415,5 +432,25 @@ in
   "test computed top-level output round-trips through option" = {
     expr = materialisedComputedOutputs.id;
     expected = "computed-nixops4";
+  };
+
+  # List MinItems enforcement.
+  "test list block below MinItems fails" = {
+    expr = (tryEvalRuleCount "fx_min_list_block" 1).success;
+    expected = false;
+  };
+  "test list block at MinItems succeeds" = {
+    expr = builtins.length (tryEvalRuleCount "fx_min_list_block" 2).value;
+    expected = 2;
+  };
+
+  # List MaxItems enforcement.
+  "test list block above MaxItems fails" = {
+    expr = (tryEvalRuleCount "fx_max_list_block" 3).success;
+    expected = false;
+  };
+  "test list block at MaxItems succeeds" = {
+    expr = builtins.length (tryEvalRuleCount "fx_max_list_block" 2).value;
+    expected = 2;
   };
 }

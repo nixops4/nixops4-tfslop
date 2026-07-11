@@ -69,15 +69,12 @@ let
   # `min_items = 0` (the default, omitted on the wire) marks the block
   # as optional: Single becomes `nullOr submodule` with `default null`,
   # List becomes `listOf submodule` with `default [ ]`. `min_items >= 1`
-  # drops the default so the user must supply a value — module-system
-  # validation surfaces a missing value as a "used but not defined"
-  # error. We do not enforce list length; that becomes a runtime
-  # diagnostic when tfplugin's Plan rejects the value.
+  # drops the default so the user must supply a value.
   #
-  # `max_items` is deliberately unused for now: tfplugin providers
-  # commonly set it as a hint (e.g. `max_items = 1` on a Single-like
-  # List), not a hard invariant. If we grow a use case we can add a
-  # `check`/`apply` layer here.
+  # For List blocks, `min_items` and `max_items` are enforced via an
+  # `apply` check that throws at eval time, so a bad length surfaces
+  # before we spawn the provider. On Single nesting `max_items` is
+  # noise (the block already caps at one) and is not enforced.
   convertInputBlockTypes =
     blockTypes:
     lib.mapAttrs (
@@ -87,7 +84,19 @@ let
           options = convertBlockInputs bt.block;
         };
         minItems = bt.min_items or 0;
+        maxItems = bt.max_items or 0;
         required = minItems >= 1;
+        enforceLength =
+          v:
+          let
+            len = builtins.length v;
+          in
+          if minItems > 0 && len < minItems then
+            throw "block ${name}: at least ${toString minItems} entries required, got ${toString len}"
+          else if maxItems > 0 && len > maxItems then
+            throw "block ${name}: at most ${toString maxItems} entries allowed, got ${toString len}"
+          else
+            v;
       in
       mkOption (
         {
@@ -102,6 +111,9 @@ let
         }
         // lib.optionalAttrs (!required) {
           default = if bt.nesting == "Single" then null else [ ];
+        }
+        // lib.optionalAttrs (bt.nesting == "List" && (minItems > 0 || maxItems > 0)) {
+          apply = enforceLength;
         }
       )
     ) blockTypes;

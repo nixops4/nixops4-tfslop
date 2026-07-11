@@ -266,6 +266,55 @@ func (p *fixtureProvider) GetProviderSchema(context.Context, *tfprotov6.GetProvi
 					},
 				},
 			},
+			// List-nested block with MinItems=2: fewer entries must
+			// fail before spawning the provider.
+			"fx_min_list_block": {
+				Version: 0,
+				Block: &tfprotov6.SchemaBlock{
+					BlockTypes: []*tfprotov6.SchemaNestedBlock{
+						{
+							TypeName: "rule",
+							Nesting:  tfprotov6.SchemaNestedBlockNestingModeList,
+							MinItems: 2,
+							Block: &tfprotov6.SchemaBlock{
+								Attributes: []*tfprotov6.SchemaAttribute{
+									{
+										Name:            "name",
+										Type:            tftypes.String,
+										Required:        true,
+										Description:     "Rule name.",
+										DescriptionKind: tfprotov6.StringKindPlain,
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+			// List-nested block with MaxItems=2: more entries must fail.
+			"fx_max_list_block": {
+				Version: 0,
+				Block: &tfprotov6.SchemaBlock{
+					BlockTypes: []*tfprotov6.SchemaNestedBlock{
+						{
+							TypeName: "rule",
+							Nesting:  tfprotov6.SchemaNestedBlockNestingModeList,
+							MaxItems: 2,
+							Block: &tfprotov6.SchemaBlock{
+								Attributes: []*tfprotov6.SchemaAttribute{
+									{
+										Name:            "name",
+										Type:            tftypes.String,
+										Required:        true,
+										Description:     "Rule name.",
+										DescriptionKind: tfprotov6.StringKindPlain,
+									},
+								},
+							},
+						},
+					},
+				},
+			},
 			// List-nested block: zero or more `rule { … }`.
 			"fx_list_block": {
 				Version: 0,
