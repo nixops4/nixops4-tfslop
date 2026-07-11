@@ -144,6 +144,72 @@ async fn update_string_via_plan_apply() {
     assert_eq!(new_state.json, br#"{"value":"after"}"#);
 }
 
+// #75: when the child process dies mid-RPC, tonic reports a generic
+// transport error ("broken pipe"). The adapter should notice the
+// exit and surface it. Two axes are probed — which RPC ("plan" or
+// "apply") and which exit code (37 or 38) — so a hardcoded string
+// in the adapter's output can't satisfy every combination.
+#[tokio::test]
+async fn mid_rpc_child_death_reports_exit_code() {
+    let Some(path) = fixture_path() else {
+        eprintln!("skipping: NIXOPS4_TFPROTO_FIXTURE not set");
+        return;
+    };
+
+    for op in ["plan", "apply"] {
+        for code in [37, 38] {
+            let client = ProviderClient::launch(&path).await.expect("launch fixture");
+            client
+                .configure_provider(b"null".to_vec())
+                .await
+                .expect("configure fixture");
+
+            let inputs =
+                format!(r#"{{"crashing_operation":"{op}","exit_code":{code}}}"#).into_bytes();
+            let err_chain = match op {
+                "plan" => {
+                    let result = client
+                        .plan_resource_change("fx_die", b"null".to_vec(), inputs.clone(), inputs)
+                        .await;
+                    let _ = client.shutdown().await;
+                    let err = result.expect_err("Plan against a dying provider must error");
+                    format!("{err:#}")
+                }
+                "apply" => {
+                    let plan = client
+                        .plan_resource_change(
+                            "fx_die",
+                            b"null".to_vec(),
+                            inputs.clone(),
+                            inputs.clone(),
+                        )
+                        .await
+                        .expect("plan must succeed for apply-crash case");
+                    let planned_state = plan.planned_state.expect("fixture returns planned state");
+                    let result = client
+                        .apply_resource_change(
+                            "fx_die",
+                            b"null".to_vec(),
+                            planned_state,
+                            plan.planned_private,
+                            inputs,
+                        )
+                        .await;
+                    let _ = client.shutdown().await;
+                    let err = result.expect_err("Apply against a dying provider must error");
+                    format!("{err:#}")
+                }
+                _ => unreachable!(),
+            };
+
+            assert!(
+                err_chain.contains(&code.to_string()),
+                "code {code} missing from {op} error chain: {err_chain}"
+            );
+        }
+    }
+}
+
 // #73: check_diagnostics is wrapped by every RPC call site with
 // `.context("provider returned diagnostics")`. The wrapper string
 // ends up above the actual message in what the user sees. The

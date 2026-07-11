@@ -11,6 +11,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"os"
 
 	"github.com/hashicorp/terraform-plugin-go/tfprotov6"
 	"github.com/hashicorp/terraform-plugin-go/tfprotov6/tf6server"
@@ -266,6 +267,34 @@ func (p *fixtureProvider) GetProviderSchema(context.Context, *tfprotov6.GetProvi
 					},
 				},
 			},
+			// Diagnostic-free crash: the caller picks *which* RPC
+			// exits (crashing_operation = "plan" | "apply") and *with
+			// what status* (exit_code). Exercises the adapter's
+			// ability to correlate the child process's exit with the
+			// RPC error across both Plan and Apply. Two axes,
+			// data-driven — encoding them into resource-type names
+			// would produce a resource per combination.
+			"fx_die": {
+				Version: 0,
+				Block: &tfprotov6.SchemaBlock{
+					Attributes: []*tfprotov6.SchemaAttribute{
+						{
+							Name:            "crashing_operation",
+							Type:            tftypes.String,
+							Required:        true,
+							Description:     `"plan" or "apply".`,
+							DescriptionKind: tfprotov6.StringKindPlain,
+						},
+						{
+							Name:            "exit_code",
+							Type:            tftypes.Number,
+							Required:        true,
+							Description:     "Status the fixture calls os.Exit with.",
+							DescriptionKind: tfprotov6.StringKindPlain,
+						},
+					},
+				},
+			},
 			// Resource with a write_only attribute. `secret` must not
 			// appear in prior_state — the adapter is supposed to strip
 			// it. Fixture's Plan errors if it sees one.
@@ -460,6 +489,12 @@ func (p *fixtureProvider) ReadResource(context.Context, *tfprotov6.ReadResourceR
 // onto declared outputs on the nixops4 side has something to pick up.
 // Apply then just echoes what Plan settled on.
 func (p *fixtureProvider) PlanResourceChange(_ context.Context, req *tfprotov6.PlanResourceChangeRequest) (*tfprotov6.PlanResourceChangeResponse, error) {
+	// fx_die: exit here if the caller asked for a Plan-time crash.
+	if req.TypeName == "fx_die" {
+		if p, ok := parseDieParams(req.ProposedNewState); ok && p.CrashingOperation == "plan" {
+			os.Exit(p.ExitCode)
+		}
+	}
 	// Assert that the adapter honours write_only on prior_state.
 	if req.TypeName == "fx_write_only" && priorStateHasField(req.PriorState, "secret") {
 		return &tfprotov6.PlanResourceChangeResponse{
@@ -500,6 +535,31 @@ func (p *fixtureProvider) PlanResourceChange(_ context.Context, req *tfprotov6.P
 	return &tfprotov6.PlanResourceChangeResponse{
 		PlannedState: planned,
 	}, nil
+}
+
+// dieParams controls the fx_die fixture: which RPC exits, and with
+// what status. The fields are wire-visible attributes on the schema.
+type dieParams struct {
+	CrashingOperation string `json:"crashing_operation"`
+	ExitCode          int    `json:"exit_code"`
+}
+
+// parseDieParams reads the fx_die attributes from a DynamicValue's
+// JSON payload. Malformed input returns ok=false so the caller
+// treats it as "no crash requested" rather than crashing with an
+// undefined status.
+func parseDieParams(pns *tfprotov6.DynamicValue) (dieParams, bool) {
+	if pns == nil || len(pns.JSON) == 0 {
+		return dieParams{}, false
+	}
+	var p dieParams
+	if err := json.Unmarshal(pns.JSON, &p); err != nil {
+		return dieParams{}, false
+	}
+	if p.CrashingOperation == "" {
+		return dieParams{}, false
+	}
+	return p, true
 }
 
 // priorStateHasField reports whether the (JSON) prior_state contains
@@ -569,6 +629,12 @@ func planFxComputedBlockAttr(pns *tfprotov6.DynamicValue) (*tfprotov6.DynamicVal
 // ApplyResourceChange echoes the planned state as the new state.
 // This is the minimum a create/update needs to do.
 func (p *fixtureProvider) ApplyResourceChange(_ context.Context, req *tfprotov6.ApplyResourceChangeRequest) (*tfprotov6.ApplyResourceChangeResponse, error) {
+	// fx_die: exit here if the caller asked for an Apply-time crash.
+	if req.TypeName == "fx_die" {
+		if p, ok := parseDieParams(req.PlannedState); ok && p.CrashingOperation == "apply" {
+			os.Exit(p.ExitCode)
+		}
+	}
 	return &tfprotov6.ApplyResourceChangeResponse{
 		NewState: req.PlannedState,
 	}, nil

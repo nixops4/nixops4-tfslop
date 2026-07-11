@@ -3,6 +3,8 @@
 use anyhow::{bail, Context, Result};
 use hyper_util::rt::TokioIo;
 use std::process::Stdio;
+use std::sync::Mutex;
+use std::time::Duration;
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::net::UnixStream;
 use tokio::process::{Child, Command};
@@ -23,7 +25,11 @@ const TF_PLUGIN_MAGIC_COOKIE_VALUE: &str =
 /// Dropping this struct does not kill the child process. Callers must
 /// call [`ProviderClient::shutdown`] to release it.
 pub struct ProviderClient {
-    process: Child,
+    // Wrapped so we can peek at the child's exit status from `&self`
+    // RPC methods after a transport error. try_wait is a quick fcntl-
+    // style probe; std Mutex is enough because we never hold the lock
+    // across an await.
+    process: Mutex<Child>,
     channel: Channel,
 }
 
@@ -85,17 +91,55 @@ impl ProviderClient {
             other => bail!("unsupported network type: {}", other),
         };
 
-        Ok(ProviderClient { process, channel })
+        Ok(ProviderClient {
+            process: Mutex::new(process),
+            channel,
+        })
     }
 
     /// SIGKILL the provider and wait for it to exit.
     ///
     /// The channel is dropped first so the server observes EOF cleanly.
-    pub async fn shutdown(mut self) -> Result<()> {
+    pub async fn shutdown(self) -> Result<()> {
         drop(self.channel);
-        let _ = self.process.start_kill();
-        let _ = self.process.wait().await;
+        // A poisoned mutex here means we panicked while inspecting the
+        // child — the child is still ours to reap either way.
+        let mut process = match self.process.into_inner() {
+            Ok(p) => p,
+            Err(poison) => poison.into_inner(),
+        };
+        let _ = process.start_kill();
+        let _ = process.wait().await;
         Ok(())
+    }
+
+    /// Wait briefly for the child to reap and, if it has exited,
+    /// decorate the error with the exit status so the user can tell
+    /// "provider crashed" from "transport hiccup". A transport-level
+    /// error whose child is still alive stays as-is.
+    async fn decorate_with_child_exit(&self, err: anyhow::Error) -> anyhow::Error {
+        // The OS may not have marked the process as reaped by the
+        // time tonic surfaces the transport error. A short pause makes
+        // detection reliable without adding noticeable latency.
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        let mut guard = match self.process.lock() {
+            Ok(g) => g,
+            Err(poison) => poison.into_inner(),
+        };
+        match guard.try_wait() {
+            Ok(Some(status)) => {
+                err.context(format!("provider process exited with status {}", status))
+            }
+            _ => err,
+        }
+    }
+
+    /// Turn a `tonic::Status` (transport-level) into an anyhow error
+    /// tagged with the RPC name, and, if the child has since exited,
+    /// with its status.
+    async fn on_transport_error(&self, rpc: &str, e: tonic::Status) -> anyhow::Error {
+        let base = anyhow::Error::from(e).context(format!("calling {}", rpc));
+        self.decorate_with_child_exit(base).await
     }
     fn provider(&self) -> tfplugin6::provider_client::ProviderClient<Channel> {
         tfplugin6::provider_client::ProviderClient::new(self.channel.clone())
@@ -106,14 +150,16 @@ impl ProviderClient {
     /// Any provider-side [`tfplugin6::Diagnostic`] with error severity in
     /// the response is surfaced as an `Err` here.
     pub async fn get_provider_schema(&self) -> Result<tfplugin6::get_provider_schema::Response> {
-        let response = self
+        let response = match self
             .provider()
             .get_provider_schema(tonic::Request::new(
                 tfplugin6::get_provider_schema::Request {},
             ))
             .await
-            .context("calling GetProviderSchema")?
-            .into_inner();
+        {
+            Ok(r) => r.into_inner(),
+            Err(e) => return Err(self.on_transport_error("GetProviderSchema", e).await),
+        };
         check_diagnostics(&response.diagnostics)?;
         Ok(response)
     }
@@ -130,12 +176,14 @@ impl ProviderClient {
             }),
             client_capabilities: None,
         };
-        let response = self
+        let response = match self
             .provider()
             .configure_provider(tonic::Request::new(req))
             .await
-            .context("calling ConfigureProvider")?
-            .into_inner();
+        {
+            Ok(r) => r.into_inner(),
+            Err(e) => return Err(self.on_transport_error("ConfigureProvider", e).await),
+        };
         check_diagnostics(&response.diagnostics)
     }
 
@@ -161,12 +209,14 @@ impl ProviderClient {
             client_capabilities: None,
             prior_identity: None,
         };
-        let response = self
+        let response = match self
             .provider()
             .plan_resource_change(tonic::Request::new(req))
             .await
-            .context("calling PlanResourceChange")?
-            .into_inner();
+        {
+            Ok(r) => r.into_inner(),
+            Err(e) => return Err(self.on_transport_error("PlanResourceChange", e).await),
+        };
         check_diagnostics(&response.diagnostics)?;
         Ok(response)
     }
@@ -189,12 +239,14 @@ impl ProviderClient {
             provider_meta: None,
             planned_identity: None,
         };
-        let response = self
+        let response = match self
             .provider()
             .apply_resource_change(tonic::Request::new(req))
             .await
-            .context("calling ApplyResourceChange")?
-            .into_inner();
+        {
+            Ok(r) => r.into_inner(),
+            Err(e) => return Err(self.on_transport_error("ApplyResourceChange", e).await),
+        };
         check_diagnostics(&response.diagnostics)?;
         Ok(response)
     }
