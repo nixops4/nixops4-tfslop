@@ -98,3 +98,92 @@ async fn create_string_via_plan_apply() {
     // survives the round trip byte-for-byte.
     assert_eq!(new_state.json, br#"{"value":"hello"}"#);
 }
+
+#[tokio::test]
+async fn update_string_via_plan_apply() {
+    let Some(path) = fixture_path() else {
+        eprintln!("skipping: NIXOPS4_TFPROTO_FIXTURE not set");
+        return;
+    };
+    let client = ProviderClient::launch(&path).await.expect("launch fixture");
+    client
+        .configure_provider(b"null".to_vec())
+        .await
+        .expect("configure fixture");
+
+    // An update carries a real prior state and a new proposed state.
+    // The fixture echoes proposed → planned → new; we assert the
+    // *new* value round-trips, not the prior one, so a bug that
+    // accidentally used prior_state would be caught.
+    let prior = br#"{"value":"before"}"#.to_vec();
+    let proposed = br#"{"value":"after"}"#.to_vec();
+    let plan = client
+        .plan_resource_change(
+            "fx_string",
+            prior.clone(),
+            proposed.clone(),
+            proposed.clone(),
+        )
+        .await
+        .expect("plan update");
+    let planned_state = plan.planned_state.expect("fixture returns planned state");
+
+    let apply = client
+        .apply_resource_change(
+            "fx_string",
+            prior,
+            planned_state,
+            plan.planned_private,
+            proposed,
+        )
+        .await
+        .expect("apply update");
+    let new_state = apply.new_state.expect("fixture returns new state");
+    client.shutdown().await.expect("clean shutdown");
+
+    assert_eq!(new_state.json, br#"{"value":"after"}"#);
+}
+
+#[tokio::test]
+async fn destroy_string_via_plan_apply() {
+    let Some(path) = fixture_path() else {
+        eprintln!("skipping: NIXOPS4_TFPROTO_FIXTURE not set");
+        return;
+    };
+    let client = ProviderClient::launch(&path).await.expect("launch fixture");
+    client
+        .configure_provider(b"null".to_vec())
+        .await
+        .expect("configure fixture");
+
+    // A destroy sends the prior state and a JSON null as the proposed
+    // state. The provider echoes it back to new_state, signalling that
+    // the resource is gone.
+    let prior = br#"{"value":"doomed"}"#.to_vec();
+    let null_state = b"null".to_vec();
+    let plan = client
+        .plan_resource_change(
+            "fx_string",
+            prior.clone(),
+            null_state.clone(),
+            null_state.clone(),
+        )
+        .await
+        .expect("plan destroy");
+    let planned_state = plan.planned_state.expect("fixture returns planned state");
+
+    let apply = client
+        .apply_resource_change(
+            "fx_string",
+            prior,
+            planned_state,
+            plan.planned_private,
+            null_state,
+        )
+        .await
+        .expect("apply destroy");
+    let new_state = apply.new_state.expect("fixture returns new state");
+    client.shutdown().await.expect("clean shutdown");
+
+    assert_eq!(new_state.json, b"null");
+}
