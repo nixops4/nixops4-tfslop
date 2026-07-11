@@ -114,7 +114,7 @@ impl ProviderClient {
             .await
             .context("calling GetProviderSchema")?
             .into_inner();
-        check_diagnostics(&response.diagnostics).context("provider returned diagnostics")?;
+        check_diagnostics(&response.diagnostics)?;
         Ok(response)
     }
 
@@ -136,7 +136,7 @@ impl ProviderClient {
             .await
             .context("calling ConfigureProvider")?
             .into_inner();
-        check_diagnostics(&response.diagnostics).context("provider returned diagnostics")
+        check_diagnostics(&response.diagnostics)
     }
 
     /// Call `PlanResourceChange` and return the raw response.
@@ -167,7 +167,7 @@ impl ProviderClient {
             .await
             .context("calling PlanResourceChange")?
             .into_inner();
-        check_diagnostics(&response.diagnostics).context("provider returned diagnostics")?;
+        check_diagnostics(&response.diagnostics)?;
         Ok(response)
     }
 
@@ -195,7 +195,7 @@ impl ProviderClient {
             .await
             .context("calling ApplyResourceChange")?
             .into_inner();
-        check_diagnostics(&response.diagnostics).context("provider returned diagnostics")?;
+        check_diagnostics(&response.diagnostics)?;
         Ok(response)
     }
 }
@@ -214,29 +214,176 @@ fn dv(json: Vec<u8>) -> tfplugin6::DynamicValue {
 /// fatal advisories. Losing them silently defeats the point. Nixops4
 /// captures the adapter's stderr, so writing there is enough to
 /// surface warnings to the user without needing a dedicated channel.
+///
+/// Severities are matched via `try_from` on the generated enum so any
+/// value we don't recognise surfaces explicitly instead of being
+/// silently filtered out. Multiple errors are aggregated on separate
+/// lines: a `; `-joined single line collapses per-diagnostic
+/// structure and, worse, that delimiter can occur in payloads.
 fn check_diagnostics(diagnostics: &[tfplugin6::Diagnostic]) -> Result<()> {
+    use tfplugin6::diagnostic::Severity;
+
+    let mut errors: Vec<String> = Vec::new();
     for d in diagnostics {
-        if d.severity == tfplugin6::diagnostic::Severity::Warning as i32 {
-            if d.detail.is_empty() {
-                eprintln!("provider warning: {}", d.summary);
-            } else {
-                eprintln!("provider warning: {}: {}", d.summary, d.detail);
+        match Severity::try_from(d.severity) {
+            Ok(Severity::Invalid) => {
+                // Placeholder value; treat as absent.
             }
+            Ok(Severity::Warning) => {
+                if d.detail.is_empty() {
+                    eprintln!("provider warning: {}", d.summary);
+                } else {
+                    eprintln!("provider warning: {}: {}", d.summary, d.detail);
+                }
+            }
+            Ok(Severity::Error) => errors.push(format_diagnostic(d)),
+            // Unknown severity: don't drop it — providers using a
+            // newer variant would otherwise go unheard.
+            Err(_) => errors.push(format!(
+                "unknown severity {}: {}",
+                d.severity,
+                format_diagnostic(d)
+            )),
         }
     }
-    let errors: Vec<String> = diagnostics
-        .iter()
-        .filter(|d| d.severity == tfplugin6::diagnostic::Severity::Error as i32)
-        .map(|d| {
-            if d.detail.is_empty() {
-                d.summary.clone()
-            } else {
-                format!("{}: {}", d.summary, d.detail)
-            }
-        })
-        .collect();
-    if !errors.is_empty() {
-        bail!("{}", errors.join("; "));
+
+    match errors.len() {
+        0 => Ok(()),
+        1 => bail!("{}", errors.remove(0)),
+        _ => {
+            let numbered: Vec<String> = errors
+                .into_iter()
+                .enumerate()
+                .map(|(i, msg)| format!("  {}. {}", i + 1, msg))
+                .collect();
+            bail!(
+                "provider reported {} errors:\n{}",
+                numbered.len(),
+                numbered.join("\n")
+            )
+        }
     }
-    Ok(())
+}
+
+fn format_diagnostic(d: &tfplugin6::Diagnostic) -> String {
+    if d.detail.is_empty() {
+        d.summary.clone()
+    } else {
+        format!("{}: {}", d.summary, d.detail)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::tfplugin6::diagnostic::Severity;
+
+    fn diag(sev: i32, summary: &str, detail: &str) -> tfplugin6::Diagnostic {
+        tfplugin6::Diagnostic {
+            severity: sev,
+            summary: summary.to_string(),
+            detail: detail.to_string(),
+            attribute: None,
+        }
+    }
+
+    // #71: An unrecognised severity value must not be silently
+    // dropped. Today `severity == Error as i32` silently ignores
+    // anything that isn't Error/Warning; if the proto grows Info or
+    // Fatal, providers using it would go unheard.
+    #[test]
+    fn unknown_severity_is_reported() {
+        let diagnostics = vec![diag(99, "mystery", "unexpected severity")];
+        let result = check_diagnostics(&diagnostics);
+        assert!(
+            result.is_err(),
+            "unknown severity {} should not be silently dropped",
+            99
+        );
+        let msg = format!("{}", result.unwrap_err());
+        assert!(
+            msg.contains("99") && msg.contains("mystery"),
+            "error should identify the severity code and the message; got: {msg}"
+        );
+    }
+
+    // #72: Multiple errors must not collapse into one flat string
+    // joined with "; ". A payload can legitimately contain that
+    // sequence, and per-diagnostic structure is lost.
+    #[test]
+    fn multiple_errors_preserve_structure() {
+        let diagnostics = vec![
+            diag(Severity::Error as i32, "first", "detail one"),
+            diag(Severity::Error as i32, "second; with; semicolons", ""),
+        ];
+        let result = check_diagnostics(&diagnostics);
+        let msg = format!("{}", result.unwrap_err());
+        // The exact format is a design choice, but two constraints:
+        // (a) both messages are present; (b) they are separated in a
+        // way a reader can tell apart even when payloads contain "; ".
+        assert!(msg.contains("first"), "missing first error: {msg}");
+        assert!(
+            msg.contains("second; with; semicolons"),
+            "missing second error verbatim: {msg}"
+        );
+        assert!(
+            msg.contains('\n'),
+            "multiple errors should be on separate lines, not joined by delimiter: {msg}"
+        );
+    }
+
+    // #73: `check_diagnostics(...).context("provider returned
+    // diagnostics")?` is the only caller pattern, so the wrapper
+    // string ends up above every diagnostic in the user's view.
+    // Assert the *inner* error does not lead with that wrapper — the
+    // caller is the one that decides context, not the check.
+    #[test]
+    fn error_does_not_include_wrapper_phrase() {
+        let diagnostics = vec![diag(Severity::Error as i32, "bad thing", "specifics")];
+        let result = check_diagnostics(&diagnostics);
+        let msg = format!("{}", result.unwrap_err());
+        assert!(
+            !msg.contains("provider returned diagnostics"),
+            "check_diagnostics must not embed the caller's context: {msg}"
+        );
+        // The user-facing message should lead with the provider's
+        // own summary, not a synthetic prefix.
+        assert!(
+            msg.starts_with("bad thing"),
+            "error should lead with the provider's summary; got: {msg}"
+        );
+    }
+
+    #[test]
+    fn single_error_is_terse() {
+        let diagnostics = vec![diag(Severity::Error as i32, "boom", "detail")];
+        let result = check_diagnostics(&diagnostics);
+        let msg = format!("{}", result.unwrap_err());
+        assert_eq!(msg, "boom: detail");
+    }
+
+    #[test]
+    fn warning_only_is_ok() {
+        let diagnostics = vec![diag(Severity::Warning as i32, "heads up", "advisory")];
+        let result = check_diagnostics(&diagnostics);
+        assert!(result.is_ok(), "warnings alone must not cause an Err");
+    }
+
+    #[test]
+    fn no_diagnostics_is_ok() {
+        let result = check_diagnostics(&[]);
+        assert!(result.is_ok());
+    }
+
+    // Severity::Invalid (0) is the "no severity set" placeholder in
+    // the proto; treat it as a no-op like an absent diagnostic.
+    #[test]
+    fn invalid_severity_is_ignored() {
+        let diagnostics = vec![diag(Severity::Invalid as i32, "nothing", "")];
+        let result = check_diagnostics(&diagnostics);
+        assert!(
+            result.is_ok(),
+            "Severity::Invalid should be ignored, not treated as an error"
+        );
+    }
 }

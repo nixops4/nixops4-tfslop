@@ -144,6 +144,51 @@ async fn update_string_via_plan_apply() {
     assert_eq!(new_state.json, br#"{"value":"after"}"#);
 }
 
+// #73: check_diagnostics is wrapped by every RPC call site with
+// `.context("provider returned diagnostics")`. The wrapper string
+// ends up above the actual message in what the user sees. The
+// caller already names the RPC (via the outer `.context("calling
+// PlanResourceChange")`), and the diagnostic itself is what
+// happened — the middle wrapper is pure noise.
+//
+// This test drives an actual error diagnostic through
+// `plan_resource_change` (by exploiting fx_write_only's guard) and
+// asserts the resulting error chain does NOT include the wrapper.
+#[tokio::test]
+async fn plan_error_omits_returned_diagnostics_wrapper() {
+    let Some(path) = fixture_path() else {
+        eprintln!("skipping: NIXOPS4_TFPROTO_FIXTURE not set");
+        return;
+    };
+    let client = ProviderClient::launch(&path).await.expect("launch fixture");
+    client
+        .configure_provider(b"null".to_vec())
+        .await
+        .expect("configure fixture");
+
+    // fx_write_only's PlanResourceChange returns an error diagnostic
+    // when prior_state contains `secret`. Call it directly at the
+    // tfplugin level, bypassing the adapter's stripping.
+    let prior = br#"{"value":"v0","secret":"leaked"}"#.to_vec();
+    let proposed = br#"{"value":"v1"}"#.to_vec();
+    let result = client
+        .plan_resource_change("fx_write_only", prior, proposed.clone(), proposed)
+        .await;
+    client.shutdown().await.expect("clean shutdown");
+
+    let err = result.expect_err("plan should have errored");
+    let chain = format!("{err:#}");
+    assert!(
+        !chain.contains("provider returned diagnostics"),
+        "wrapper phrase should not appear in the error chain: {chain}"
+    );
+    // Sanity: the actual provider message must still be visible.
+    assert!(
+        chain.contains("prior_state.secret leaked"),
+        "provider's diagnostic summary is missing: {chain}"
+    );
+}
+
 #[tokio::test]
 async fn destroy_string_via_plan_apply() {
     let Some(path) = fixture_path() else {
