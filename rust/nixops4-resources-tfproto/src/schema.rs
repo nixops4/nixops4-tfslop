@@ -40,6 +40,11 @@ pub struct Block {
     /// Empty for most modern schemas but present in many real providers.
     #[serde(skip_serializing_if = "BTreeMap::is_empty")]
     pub block_types: BTreeMap<String, BlockType>,
+    /// tfplugin `deprecated`: the whole block should not be used.
+    /// Adapter emits a `provider warning:` per hit when the user's
+    /// input touches it.
+    #[serde(skip_serializing_if = "is_false", default)]
+    pub deprecated: bool,
 }
 
 #[derive(Debug, Serialize)]
@@ -96,6 +101,11 @@ pub struct Attribute {
     /// persisted in state. Adapter strips it from `prior_state`.
     #[serde(skip_serializing_if = "is_false", default)]
     pub write_only: bool,
+    /// tfplugin `deprecated`: the attribute should not be used.
+    /// Adapter emits a `provider warning:` per hit when the user's
+    /// input touches it.
+    #[serde(skip_serializing_if = "is_false", default)]
+    pub deprecated: bool,
     #[serde(skip_serializing_if = "String::is_empty")]
     pub description: String,
 }
@@ -142,6 +152,7 @@ impl Block {
         Block {
             attributes: BTreeMap::new(),
             block_types: BTreeMap::new(),
+            deprecated: false,
         }
     }
 
@@ -165,6 +176,7 @@ impl Block {
         Ok(Block {
             attributes,
             block_types,
+            deprecated: block.deprecated,
         })
     }
 }
@@ -215,6 +227,7 @@ impl Attribute {
             optional: a.optional,
             computed: a.computed,
             write_only: a.write_only,
+            deprecated: a.deprecated,
             description: a.description,
         })
     }

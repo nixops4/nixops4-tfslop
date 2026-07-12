@@ -152,6 +152,7 @@ mod tests {
             optional: false,
             computed,
             write_only: false,
+            deprecated: false,
             description: String::new(),
         }
     }
@@ -162,6 +163,7 @@ mod tests {
         let inner = Block {
             attributes: inner_attrs,
             block_types: BTreeMap::new(),
+            deprecated: false,
         };
         let mut block_types = BTreeMap::new();
         block_types.insert(
@@ -176,6 +178,7 @@ mod tests {
         Block {
             attributes: BTreeMap::new(),
             block_types,
+            deprecated: false,
         }
     }
 

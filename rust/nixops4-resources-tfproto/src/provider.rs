@@ -6,6 +6,7 @@ use nixops4_resource::framework::ResourceProvider;
 use nixops4_resource::schema::v0;
 use serde_json::{Map, Value};
 
+use crate::deprecation::collect_deprecated_hits;
 use crate::outputs::project_new_state;
 use crate::prior_state::build_prior_state_json;
 use crate::schema::ProviderSchema;
@@ -116,6 +117,16 @@ async fn plan_and_apply_inner(
         None => b"null".to_vec(),
         Some(p) => build_prior_state_json(&schema, type_name, p.inputs, p.outputs)?,
     };
+
+    // Deprecation warnings are cross-referenced against inputs so we
+    // only nag about fields the user actually set. Skip the destroy
+    // path where inputs_json is the JSON null we send to tell the
+    // provider to tear the resource down.
+    if let Ok(Value::Object(inputs_map)) = serde_json::from_slice::<Value>(&inputs_json) {
+        for msg in collect_deprecated_hits(&schema, type_name, &inputs_map) {
+            eprintln!("{}", msg);
+        }
+    }
 
     // The fixture takes no configuration. Real providers configured
     // through the resource `tf-provider-*` prefix mechanism land later
