@@ -146,6 +146,45 @@ async fn update_string_via_plan_apply() {
     assert_eq!(new_state.json, br#"{"value":"after"}"#);
 }
 
+// #41: `requires_replace` on Plan means "this change can't be done
+// in place — destroy and recreate." Nixops4 has no state-machine
+// for that yet, so silently proceeding would produce a broken plan.
+// The adapter must reject with a clear message naming the paths.
+#[tokio::test]
+async fn plan_requires_replace_surfaces_paths() {
+    let Some(path) = fixture_path() else {
+        eprintln!("skipping: NIXOPS4_TFPROTO_FIXTURE not set");
+        return;
+    };
+    let client = ProviderClient::launch(&path).await.expect("launch fixture");
+    client
+        .configure_provider(b"null".to_vec())
+        .await
+        .expect("configure fixture");
+
+    // Even a first Plan on this resource returns requires_replace,
+    // because the fixture Plan always sets it — enough to exercise
+    // the adapter's guard without needing a prior state.
+    let inputs = br#"{"value":"anything"}"#.to_vec();
+    let result = client
+        .plan_resource_change("fx_needs_replace", b"null".to_vec(), inputs.clone(), inputs)
+        .await;
+    let _ = client.shutdown().await;
+
+    let err = result.expect_err("Plan with requires_replace must surface as an error");
+    let chain = format!("{err:#}");
+    assert!(
+        chain.contains("requires_replace")
+            || chain.contains("destroy")
+            || chain.contains("replace"),
+        "error should identify a requires-replace signal; got: {chain}"
+    );
+    assert!(
+        chain.contains("value"),
+        "error should name the attribute path; got: {chain}"
+    );
+}
+
 // #48: providers can return `Deferred` on Plan meaning "not enough
 // info yet." The multi-cycle retry semantics Terraform uses don't
 // apply here — nixops4 only calls Apply with a complete set of

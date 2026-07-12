@@ -356,6 +356,7 @@ impl ProviderClient {
             .await?;
         check_diagnostics(&response.diagnostics)?;
         check_deferred(response.deferred.as_ref(), "PlanResourceChange")?;
+        check_requires_replace(&response.requires_replace)?;
         Ok(response)
     }
 
@@ -398,6 +399,29 @@ fn dv(json: Vec<u8>) -> tfplugin6::DynamicValue {
         msgpack: Vec::new(),
         json,
     }
+}
+
+/// Bail when the provider signalled `requires_replace` on a Plan.
+///
+/// The provider is saying "this change can't be done in place —
+/// destroy and recreate." nixops4 has no state-machine concept for
+/// that; silently proceeding would produce a broken apply. Until
+/// nixops4 grows a way to accept the signal, refuse with a message
+/// naming the paths so the user can either destroy the resource
+/// themselves and re-apply, or change their config to avoid the
+/// replace.
+fn check_requires_replace(paths: &[tfplugin6::AttributePath]) -> Result<()> {
+    if paths.is_empty() {
+        return Ok(());
+    }
+    let formatted: Vec<String> = paths
+        .iter()
+        .map(|p| format_attribute_path(p).unwrap_or_else(|| "<empty>".to_string()))
+        .collect();
+    bail!(
+        "provider requires destroy+recreate for {}; nixops4 has no in-place replace, remove the resource and re-apply",
+        formatted.join(", ")
+    );
 }
 
 /// Bail when the provider returned a `Deferred` field on a response.

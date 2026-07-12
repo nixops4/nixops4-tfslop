@@ -103,6 +103,25 @@ func (p *fixtureProvider) GetProviderSchema(context.Context, *tfprotov6.GetProvi
 					},
 				},
 			},
+			// Plan handler returns `requires_replace` for the `value`
+			// attribute. The provider is saying "this change can't
+			// be done in place — destroy and recreate." nixops4 has
+			// no such concept today; the adapter rejects with a
+			// clear message rather than silently applying.
+			"fx_needs_replace": {
+				Version: 0,
+				Block: &tfprotov6.SchemaBlock{
+					Attributes: []*tfprotov6.SchemaAttribute{
+						{
+							Name:            "value",
+							Type:            tftypes.String,
+							Required:        true,
+							Description:     "Provider will demand replace on any change.",
+							DescriptionKind: tfprotov6.StringKindPlain,
+						},
+					},
+				},
+			},
 			// cty `dynamic` (aka "any"): the provider allows the
 			// value to be any shape. Wire encoding is the JSON
 			// string "dynamic" — same shape as primitives.
@@ -686,6 +705,15 @@ func (p *fixtureProvider) PlanResourceChange(_ context.Context, req *tfprotov6.P
 	// timeout can be exercised. The child is reaped on shutdown.
 	if req.TypeName == "fx_hang_on_plan" {
 		select {}
+	}
+	// fx_needs_replace: return requires_replace naming `value`.
+	if req.TypeName == "fx_needs_replace" {
+		return &tfprotov6.PlanResourceChangeResponse{
+			PlannedState: req.ProposedNewState,
+			RequiresReplace: []*tftypes.AttributePath{
+				tftypes.NewAttributePath().WithAttributeName("value"),
+			},
+		}, nil
 	}
 	// fx_defer: return a Deferred Plan response if the caller asked.
 	if req.TypeName == "fx_defer" {
