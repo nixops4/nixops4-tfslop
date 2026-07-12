@@ -230,6 +230,40 @@ async fn update_fx_write_only_strips_secret_from_prior_state() {
     client.close_wait().await.expect("close adapter");
 }
 
+// #43: the adapter must call ValidateResourceConfig before Plan so
+// config errors surface at the earliest layer. A provider whose
+// Validate rejects but whose Plan wouldn't would otherwise let the
+// error go unheard — Plan produces some default and the user's
+// broken config gets applied.
+#[tokio::test]
+async fn create_calls_validate_resource_config_before_plan() {
+    let Some(fixture) = fixture_path() else {
+        eprintln!("skipping: NIXOPS4_TFPROTO_FIXTURE not set");
+        return;
+    };
+
+    let mut client = ResourceProviderClient::new(ResourceProviderConfig {
+        provider_executable: ADAPTER.to_string(),
+        provider_args: vec!["run".to_string(), "--provider-exe".to_string(), fixture],
+    })
+    .await
+    .expect("spawn adapter");
+
+    let inputs = Map::new();
+    let result = client
+        .create("fx_validate_always_rejects", &inputs, true)
+        .await;
+
+    client.close_wait().await.expect("close adapter");
+
+    let err = result.expect_err("create must surface ValidateResourceConfig rejection");
+    let msg = format!("{err:#}");
+    assert!(
+        msg.contains("validate rejected the resource config"),
+        "adapter must surface the Validate diagnostic; got: {msg}"
+    );
+}
+
 #[tokio::test]
 async fn destroy_fx_string_via_nixops4_protocol() {
     let Some(fixture) = fixture_path() else {

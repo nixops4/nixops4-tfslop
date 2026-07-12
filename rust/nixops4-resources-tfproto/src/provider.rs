@@ -133,6 +133,15 @@ async fn plan_and_apply_inner(
     // in the series.
     client.configure_provider(b"null".to_vec()).await?;
 
+    // Validate the resource config before Plan. Surfaces schema-shape
+    // and provider-invariant errors at the earliest layer, where the
+    // provider's message is most specific to the user's config — Plan
+    // would either error later with a less-specific message, or (worse)
+    // silently substitute defaults for the bad input.
+    client
+        .validate_resource_config(type_name, inputs_json.clone())
+        .await?;
+
     let plan = client
         .plan_resource_change(
             type_name,

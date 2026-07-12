@@ -418,6 +418,11 @@ func (p *fixtureProvider) GetProviderSchema(context.Context, *tfprotov6.GetProvi
 			// providers may silently drop or reject write-only
 			// attributes when the client doesn't announce support.
 			"fx_check_write_only_capability": {Version: 0, Block: &tfprotov6.SchemaBlock{}},
+			// ValidateResourceConfig always returns an error. If the
+			// adapter's plan-and-apply flow reaches Plan without
+			// having called ValidateResourceConfig first, the create
+			// silently succeeds — the error goes unheard.
+			"fx_validate_always_rejects": {Version: 0, Block: &tfprotov6.SchemaBlock{}},
 			"fx_die": {
 				Version: 0,
 				Block: &tfprotov6.SchemaBlock{
@@ -674,6 +679,14 @@ func (p *fixtureProvider) ValidateResourceConfig(_ context.Context, req *tfproto
 				}},
 			}, nil
 		}
+	}
+	if req.TypeName == "fx_validate_always_rejects" {
+		return &tfprotov6.ValidateResourceConfigResponse{
+			Diagnostics: []*tfprotov6.Diagnostic{{
+				Severity: tfprotov6.DiagnosticSeverityError,
+				Summary:  "validate rejected the resource config",
+			}},
+		}, nil
 	}
 	return &tfprotov6.ValidateResourceConfigResponse{}, nil
 }
