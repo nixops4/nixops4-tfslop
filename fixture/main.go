@@ -103,6 +103,23 @@ func (p *fixtureProvider) GetProviderSchema(context.Context, *tfprotov6.GetProvi
 					},
 				},
 			},
+			// cty `dynamic` (aka "any"): the provider allows the
+			// value to be any shape. Wire encoding is the JSON
+			// string "dynamic" — same shape as primitives.
+			"fx_dynamic": {
+				Version: 0,
+				Block: &tfprotov6.SchemaBlock{
+					Attributes: []*tfprotov6.SchemaAttribute{
+						{
+							Name:            "value",
+							Type:            tftypes.DynamicPseudoType,
+							Required:        true,
+							Description:     "A required dynamic (any-shape) value.",
+							DescriptionKind: tfprotov6.StringKindPlain,
+						},
+					},
+				},
+			},
 			// cty `tuple` attribute: ordered, fixed-length,
 			// heterogeneous element types. Rare in real providers
 			// but part of the type surface.

@@ -71,6 +71,26 @@ let
     (lib.evalModules {
       modules = [ cfg.resourceTypes.fx_tuple.inputs ];
     }).options;
+  fxDynamicInputOptions =
+    (lib.evalModules {
+      modules = [ cfg.resourceTypes.fx_dynamic.inputs ];
+    }).options;
+  materialisedDynamic =
+    (lib.evalModules {
+      modules = [
+        cfg.resourceTypes.fx_dynamic.inputs
+        {
+          value = {
+            arbitrary = "shape";
+            list = [
+              1
+              2
+              3
+            ];
+          };
+        }
+      ];
+    }).config;
   materialisedTuple =
     (lib.evalModules {
       modules = [
@@ -449,6 +469,27 @@ in
   "test tuple with wrong length fails" = {
     expr = (tryEvalTupleLength 2).success;
     expected = false;
+  };
+
+  # cty `dynamic` (any type) → `types.raw`. The provider decides
+  # what shape it accepts at Plan; nix has no meaningful check to
+  # apply upstream.
+
+  "test dynamic attribute becomes types.raw" = {
+    expr = fxDynamicInputOptions.value.type.name;
+    expected = "raw";
+  };
+
+  "test dynamic attribute value round-trips through option" = {
+    expr = materialisedDynamic.value;
+    expected = {
+      arbitrary = "shape";
+      list = [
+        1
+        2
+        3
+      ];
+    };
   };
 
   # Nested blocks. A Single-nesting block becomes `nullOr submodule` so

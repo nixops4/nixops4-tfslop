@@ -37,6 +37,11 @@ let
     # widen to a more general type.
     else if parsed == "number" then
       types.int
+    # cty `dynamic` (aka "any"): the provider accepts any shape and
+    # decides validity at Plan. Nix has no meaningful check to apply
+    # upstream; `types.raw` passes the value through untouched.
+    else if parsed == "dynamic" then
+      types.raw
     else if builtins.isList parsed && builtins.length parsed == 2 && builtins.head parsed == "list" then
       types.listOf (ctyParsedToOptionType (builtins.elemAt parsed 1))
     # cty `map(T)`: dynamic string keys, uniform value type. Maps to
