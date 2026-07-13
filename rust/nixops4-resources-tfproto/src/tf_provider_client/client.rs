@@ -329,20 +329,23 @@ impl ProviderClient {
     ///
     /// `proposed_new_state_json` is the go-cty JSON encoding of what the
     /// caller wants the resource to become. For a create operation,
-    /// `prior_state_json` should be `b"null"`.
+    /// `prior_state_json` should be `b"null"` and `prior_private` should
+    /// be empty. On update/destroy, `prior_private` is the opaque cookie
+    /// the provider returned from the previous Apply.
     pub async fn plan_resource_change(
         &self,
         type_name: &str,
         prior_state_json: Vec<u8>,
         proposed_new_state_json: Vec<u8>,
         config_json: Vec<u8>,
+        prior_private: Vec<u8>,
     ) -> Result<tfplugin6::plan_resource_change::Response> {
         let req = tfplugin6::plan_resource_change::Request {
             type_name: type_name.to_string(),
             prior_state: Some(dv(prior_state_json)),
             proposed_new_state: Some(dv(proposed_new_state_json)),
             config: Some(dv(config_json)),
-            prior_private: Vec::new(),
+            prior_private,
             provider_meta: None,
             client_capabilities: Some(announced_client_capabilities()),
             prior_identity: None,

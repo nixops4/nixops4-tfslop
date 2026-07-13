@@ -77,6 +77,7 @@ async fn create_string_via_plan_apply() {
             b"null".to_vec(),
             proposed.clone(),
             proposed.clone(),
+            Vec::new(),
         )
         .await
         .expect("plan create");
@@ -125,6 +126,7 @@ async fn update_string_via_plan_apply() {
             prior.clone(),
             proposed.clone(),
             proposed.clone(),
+            Vec::new(),
         )
         .await
         .expect("plan update");
@@ -167,7 +169,13 @@ async fn plan_requires_replace_surfaces_paths() {
     // the adapter's guard without needing a prior state.
     let inputs = br#"{"value":"anything"}"#.to_vec();
     let result = client
-        .plan_resource_change("fx_needs_replace", b"null".to_vec(), inputs.clone(), inputs)
+        .plan_resource_change(
+            "fx_needs_replace",
+            b"null".to_vec(),
+            inputs.clone(),
+            inputs,
+            Vec::new(),
+        )
         .await;
     let _ = client.shutdown().await;
 
@@ -223,7 +231,13 @@ async fn deferred_response_surfaces_reason() {
         let inputs =
             format!(r#"{{"deferring_operation":"plan","reason":"{reason}"}}"#).into_bytes();
         let result = client
-            .plan_resource_change("fx_defer", b"null".to_vec(), inputs.clone(), inputs)
+            .plan_resource_change(
+                "fx_defer",
+                b"null".to_vec(),
+                inputs.clone(),
+                inputs,
+                Vec::new(),
+            )
             .await;
         let _ = client.shutdown().await;
 
@@ -283,6 +297,7 @@ async fn plan_against_hanging_provider_times_out() {
             b"null".to_vec(),
             b"{}".to_vec(),
             b"{}".to_vec(),
+            Vec::new(),
         )
         .await;
     let elapsed = start.elapsed();
@@ -387,7 +402,13 @@ async fn mid_rpc_child_death_reports_exit_code() {
             let err_chain = match op {
                 "plan" => {
                     let result = client
-                        .plan_resource_change("fx_die", b"null".to_vec(), inputs.clone(), inputs)
+                        .plan_resource_change(
+                            "fx_die",
+                            b"null".to_vec(),
+                            inputs.clone(),
+                            inputs,
+                            Vec::new(),
+                        )
                         .await;
                     let _ = client.shutdown().await;
                     let err = result.expect_err("Plan against a dying provider must error");
@@ -400,6 +421,7 @@ async fn mid_rpc_child_death_reports_exit_code() {
                             b"null".to_vec(),
                             inputs.clone(),
                             inputs.clone(),
+                            Vec::new(),
                         )
                         .await
                         .expect("plan must succeed for apply-crash case");
@@ -456,7 +478,13 @@ async fn plan_error_omits_returned_diagnostics_wrapper() {
     let prior = br#"{"value":"v0","secret":"leaked"}"#.to_vec();
     let proposed = br#"{"value":"v1"}"#.to_vec();
     let result = client
-        .plan_resource_change("fx_write_only", prior, proposed.clone(), proposed)
+        .plan_resource_change(
+            "fx_write_only",
+            prior,
+            proposed.clone(),
+            proposed,
+            Vec::new(),
+        )
         .await;
     client.shutdown().await.expect("clean shutdown");
 
@@ -496,6 +524,7 @@ async fn destroy_string_via_plan_apply() {
             prior.clone(),
             null_state.clone(),
             null_state.clone(),
+            Vec::new(),
         )
         .await
         .expect("plan destroy");

@@ -11,6 +11,7 @@ pub mod tfplugin6 {
 pub mod deprecation;
 pub mod outputs;
 pub mod prior_state;
+pub mod private_state;
 pub mod provider;
 pub mod schema;
 pub mod tf_provider_client;

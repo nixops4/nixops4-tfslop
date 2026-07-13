@@ -10,6 +10,7 @@ package main
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"os"
 
@@ -591,6 +592,37 @@ func (p *fixtureProvider) GetProviderSchema(context.Context, *tfprotov6.GetProvi
 					},
 				},
 			},
+			// Round-trips the tfplugin `private` cookie so tests can
+			// prove the adapter persists Apply.private and feeds it
+			// back as Plan.prior_private on the next cycle.
+			"fx_private": {
+				Version: 0,
+				Block: &tfprotov6.SchemaBlock{
+					Attributes: []*tfprotov6.SchemaAttribute{
+						{
+							Name:            "token",
+							Type:            tftypes.String,
+							Required:        true,
+							Description:     "Value the fixture writes into planned_private (as `private-for-<token>`).",
+							DescriptionKind: tfprotov6.StringKindPlain,
+						},
+						{
+							Name:            "expected_prior_b64",
+							Type:            tftypes.String,
+							Optional:        true,
+							Description:     "If set, Plan asserts base64(prior_private) equals this value.",
+							DescriptionKind: tfprotov6.StringKindPlain,
+						},
+						{
+							Name:            "is_destroy_probe",
+							Type:            tftypes.Bool,
+							Optional:        true,
+							Description:     "If set on prior_state, destroy asserts prior_private is non-empty.",
+							DescriptionKind: tfprotov6.StringKindPlain,
+						},
+					},
+				},
+			},
 		},
 		DataSourceSchemas: map[string]*tfprotov6.Schema{},
 	}, nil
@@ -748,6 +780,7 @@ func (p *fixtureProvider) PlanResourceChange(_ context.Context, req *tfprotov6.P
 		}, nil
 	}
 	planned := req.ProposedNewState
+	var plannedPrivate []byte
 	switch req.TypeName {
 	case "fx_computed":
 		enriched, err := planFxComputed(req.ProposedNewState)
@@ -773,9 +806,18 @@ func (p *fixtureProvider) PlanResourceChange(_ context.Context, req *tfprotov6.P
 			}, nil
 		}
 		planned = enriched
+	case "fx_private":
+		bytes, diag := planFxPrivate(req.ProposedNewState, req.PriorState, req.PriorPrivate)
+		if diag != nil {
+			return &tfprotov6.PlanResourceChangeResponse{
+				Diagnostics: []*tfprotov6.Diagnostic{diag},
+			}, nil
+		}
+		plannedPrivate = bytes
 	}
 	return &tfprotov6.PlanResourceChangeResponse{
-		PlannedState: planned,
+		PlannedState:   planned,
+		PlannedPrivate: plannedPrivate,
 	}, nil
 }
 
@@ -875,6 +917,62 @@ func planFxComputed(pns *tfprotov6.DynamicValue) (*tfprotov6.DynamicValue, error
 	return &tfprotov6.DynamicValue{JSON: out}, nil
 }
 
+// planFxPrivate encodes the private-state round-trip behaviour:
+//
+//   - On create/update (proposed != null): if `expected_prior_b64` is
+//     set on inputs, assert base64(prior_private) matches. Return
+//     `private-for-<token>` as the planned_private.
+//   - On destroy (proposed == null): a resource with no prior private
+//     is fine (nothing to check). A destroy with prior state loaded
+//     from nixops4 MUST carry the corresponding prior_private through;
+//     the fixture cannot see the "expected" bytes on destroy (inputs
+//     are gone), so we assert only that it is non-empty. A regression
+//     that drops private_state on the destroy path will surface as an
+//     empty prior_private → fixture error → adapter error → test fail.
+//     The `is_destroy_probe` marker in prior_state selects this check;
+//     other destroys stay silent so unrelated tests aren't affected.
+func planFxPrivate(pns, priorState *tfprotov6.DynamicValue, priorPrivate []byte) ([]byte, *tfprotov6.Diagnostic) {
+	if pns == nil || len(pns.JSON) == 0 {
+		// Destroy path.
+		if priorState != nil && len(priorState.JSON) > 0 {
+			var m map[string]any
+			if err := json.Unmarshal(priorState.JSON, &m); err == nil {
+				if flag, _ := m["is_destroy_probe"].(bool); flag && len(priorPrivate) == 0 {
+					return nil, &tfprotov6.Diagnostic{
+						Severity: tfprotov6.DiagnosticSeverityError,
+						Summary:  "fx_private: destroy dropped prior_private",
+						Detail:   "adapter must feed stored private_state back into prior_private on destroy",
+					}
+				}
+			}
+		}
+		return nil, nil
+	}
+	var m map[string]any
+	if err := json.Unmarshal(pns.JSON, &m); err != nil {
+		return nil, &tfprotov6.Diagnostic{
+			Severity: tfprotov6.DiagnosticSeverityError,
+			Summary:  "planFxPrivate: bad proposed_new_state",
+			Detail:   err.Error(),
+		}
+	}
+	if m == nil {
+		return nil, nil
+	}
+	if expected, ok := m["expected_prior_b64"].(string); ok && expected != "" {
+		actual := base64.StdEncoding.EncodeToString(priorPrivate)
+		if actual != expected {
+			return nil, &tfprotov6.Diagnostic{
+				Severity: tfprotov6.DiagnosticSeverityError,
+				Summary:  "fx_private: prior_private mismatch",
+				Detail:   "expected base64=" + expected + ", got base64=" + actual,
+			}
+		}
+	}
+	token, _ := m["token"].(string)
+	return []byte("private-for-" + token), nil
+}
+
 // planFxComputedBlockAttr populates the computed `token` inside the
 // nested `settings` block. Exercises new_state projection through a
 // Single-nested block. When the user omits `settings`, leave the
@@ -910,8 +1008,15 @@ func (p *fixtureProvider) ApplyResourceChange(_ context.Context, req *tfprotov6.
 			os.Exit(p.ExitCode)
 		}
 	}
+	// fx_private: promote the planned_private the adapter round-tripped
+	// from Plan into the final Apply.private the adapter must persist.
+	var private []byte
+	if req.TypeName == "fx_private" {
+		private = req.PlannedPrivate
+	}
 	return &tfprotov6.ApplyResourceChangeResponse{
 		NewState: req.PlannedState,
+		Private:  private,
 	}, nil
 }
 

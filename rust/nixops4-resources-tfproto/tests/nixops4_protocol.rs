@@ -7,6 +7,7 @@
 //! up: adapter parses the request, launches the fixture, runs Plan +
 //! Apply, and returns a response nixops4 accepts.
 
+use base64::Engine as _;
 use nixops4_resource::schema::v0;
 use nixops4_resource_runner::{ResourceProviderClient, ResourceProviderConfig};
 use serde_json::{Map, Value};
@@ -34,16 +35,16 @@ async fn create_fx_string_via_nixops4_protocol() {
     let mut inputs = Map::new();
     inputs.insert("value".to_string(), Value::String("hello".to_string()));
 
-    let outputs = client
+    let outcome = client
         .create("fx_string", &inputs, true)
         .await
         .expect("create fx_string");
 
     // fx_string declares no computed attributes; output is empty.
     assert!(
-        outputs.is_empty(),
+        outcome.output_properties.is_empty(),
         "expected no output properties, got {:?}",
-        outputs
+        outcome.output_properties
     );
 
     client.close_wait().await.expect("close adapter");
@@ -72,20 +73,21 @@ async fn update_fx_string_via_nixops4_protocol() {
     let mut new_inputs = Map::new();
     new_inputs.insert("value".to_string(), Value::String("after".to_string()));
 
-    let outputs = client
+    let outcome = client
         .update(
             "fx_string",
             &new_inputs,
             &previous_inputs,
             &previous_outputs,
+            None,
         )
         .await
         .expect("update fx_string");
 
     assert!(
-        outputs.is_empty(),
+        outcome.output_properties.is_empty(),
         "expected no output properties, got {:?}",
-        outputs
+        outcome.output_properties
     );
 
     client.close_wait().await.expect("close adapter");
@@ -111,7 +113,8 @@ async fn create_fx_computed_projects_id_output() {
     let outputs = client
         .create("fx_computed", &inputs, true)
         .await
-        .expect("create fx_computed");
+        .expect("create fx_computed")
+        .output_properties;
 
     // The fixture populates `id = "computed-" + value` during Plan.
     // The user-provided `value` must not leak into outputs.
@@ -157,7 +160,8 @@ async fn create_fx_computed_block_projects_nested_token() {
     let outputs = client
         .create("fx_computed_block_attr", &inputs, true)
         .await
-        .expect("create fx_computed_block_attr");
+        .expect("create fx_computed_block_attr")
+        .output_properties;
 
     // Outputs preserve block structure. `endpoint` is a user input
     // and must not appear in outputs; `token` is computed and must.
@@ -223,6 +227,7 @@ async fn update_fx_write_only_strips_secret_from_prior_state() {
             &new_inputs,
             &previous_inputs,
             &previous_outputs,
+            None,
         )
         .await
         .expect("update fx_write_only");
@@ -285,9 +290,144 @@ async fn destroy_fx_string_via_nixops4_protocol() {
         type_: v0::ResourceType("fx_string".to_string()),
         input_properties: v0::InputProperties(prev_inputs),
         output_properties: Some(v0::OutputProperties(Map::new())),
+        private_state: None,
     };
 
     client.destroy(resource).await.expect("destroy fx_string");
+
+    client.close_wait().await.expect("close adapter");
+}
+
+// #40: `private_state` end-to-end. Create must surface a non-None
+// private_state derived from Apply.private. Update must feed that
+// value back so the fixture's Plan sees the previously-emitted bytes
+// as prior_private, and the freshly returned private_state must
+// reflect the new token.
+//
+// Encoding is opaque to nixops4 — the adapter picks it — so this test
+// asserts round-trip semantics without pinning the specific JSON
+// shape: whatever create returned must survive back to the fixture
+// unchanged and the fixture's prior-private assertion must hold.
+#[tokio::test]
+async fn fx_private_round_trips_between_create_and_update() {
+    let Some(fixture) = fixture_path() else {
+        eprintln!("skipping: NIXOPS4_TFPROTO_FIXTURE not set");
+        return;
+    };
+
+    let mut client = ResourceProviderClient::new(ResourceProviderConfig {
+        provider_executable: ADAPTER.to_string(),
+        provider_args: vec!["run".to_string(), "--provider-exe".to_string(), fixture],
+    })
+    .await
+    .expect("spawn adapter");
+
+    let mut create_inputs = Map::new();
+    create_inputs.insert("token".to_string(), Value::String("alpha".to_string()));
+
+    let create_outcome = client
+        .create("fx_private", &create_inputs, true)
+        .await
+        .expect("create fx_private");
+
+    let private_after_create = create_outcome
+        .private_state
+        .clone()
+        .expect("create must surface Apply.private as private_state");
+
+    // Prove the create outcome is what the fixture handed us, not some
+    // fabricated placeholder: base64-decode and check the payload.
+    // (The fixture writes `private-for-<token>`.)
+    let created_b64 = private_after_create
+        .as_str()
+        .expect("private_state must round-trip as a JSON string");
+    let created_bytes = base64::engine::general_purpose::STANDARD
+        .decode(created_b64)
+        .expect("private_state must decode as base64");
+    assert_eq!(
+        created_bytes, b"private-for-alpha",
+        "adapter must faithfully surface the bytes the provider chose"
+    );
+
+    // Update: pass `expected_prior_b64 = created_b64`. The fixture's
+    // Plan checks `base64(prior_private) == expected_prior_b64` and
+    // errors otherwise — so a passing call is proof the adapter
+    // threaded private_state → prior_private.
+    let mut update_inputs = Map::new();
+    update_inputs.insert("token".to_string(), Value::String("beta".to_string()));
+    update_inputs.insert(
+        "expected_prior_b64".to_string(),
+        Value::String(created_b64.to_string()),
+    );
+
+    let update_outcome = client
+        .update(
+            "fx_private",
+            &update_inputs,
+            &create_inputs,
+            &Map::new(),
+            Some(private_after_create),
+        )
+        .await
+        .expect("update fx_private (adapter must feed prior private_state back to Plan)");
+
+    let updated_b64 = update_outcome
+        .private_state
+        .as_ref()
+        .and_then(|v| v.as_str())
+        .expect("update must surface a fresh private_state");
+    let updated_bytes = base64::engine::general_purpose::STANDARD
+        .decode(updated_b64)
+        .expect("updated private_state must decode as base64");
+    assert_eq!(
+        updated_bytes, b"private-for-beta",
+        "update must reflect the rotated private state from the provider"
+    );
+
+    client.close_wait().await.expect("close adapter");
+}
+
+// Destroy must also thread private_state back into prior_private, or
+// providers that clean up private-side bookkeeping on destroy will
+// silently misbehave. Uses the same fx_private guard, but on the
+// destroy path (proposed_new_state = null).
+#[tokio::test]
+async fn destroy_fx_private_receives_prior_private_state() {
+    let Some(fixture) = fixture_path() else {
+        eprintln!("skipping: NIXOPS4_TFPROTO_FIXTURE not set");
+        return;
+    };
+
+    let mut client = ResourceProviderClient::new(ResourceProviderConfig {
+        provider_executable: ADAPTER.to_string(),
+        provider_args: vec!["run".to_string(), "--provider-exe".to_string(), fixture],
+    })
+    .await
+    .expect("spawn adapter");
+
+    // Pretend a create previously stored some private bytes. Since
+    // fx_private echoes `private-for-<token>`, we compute the same
+    // base64 the create path would produce.
+    let stored = base64::engine::general_purpose::STANDARD.encode(b"private-for-gamma");
+    let mut prev_inputs = Map::new();
+    prev_inputs.insert("token".to_string(), Value::String("gamma".to_string()));
+    // Flag on prior_state that tells the fixture to enforce the
+    // destroy-time non-empty-prior_private guard. Without it, destroy
+    // wouldn't have any way to observe a dropped private_state (the
+    // proposed_new_state is null and the inputs are gone).
+    prev_inputs.insert("is_destroy_probe".to_string(), Value::Bool(true));
+
+    let resource = v0::ExtantResource {
+        type_: v0::ResourceType("fx_private".to_string()),
+        input_properties: v0::InputProperties(prev_inputs),
+        output_properties: Some(v0::OutputProperties(Map::new())),
+        private_state: Some(v0::PrivateState(Value::String(stored))),
+    };
+
+    client
+        .destroy(resource)
+        .await
+        .expect("destroy fx_private must round-trip stored private_state without error");
 
     client.close_wait().await.expect("close adapter");
 }

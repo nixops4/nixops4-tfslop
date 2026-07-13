@@ -9,6 +9,7 @@ use serde_json::{Map, Value};
 use crate::deprecation::collect_deprecated_hits;
 use crate::outputs::project_new_state;
 use crate::prior_state::build_prior_state_json;
+use crate::private_state;
 use crate::schema::ProviderSchema;
 use crate::tf_provider_client::ProviderClient;
 
@@ -18,6 +19,14 @@ use crate::tf_provider_client::ProviderClient;
 struct PriorState {
     inputs: Map<String, Value>,
     outputs: Option<Map<String, Value>>,
+}
+
+/// Whole outcome of one Plan+Apply run: outputs projected onto the
+/// declared schema, plus the opaque `private` bytes the provider chose
+/// to persist for the next cycle.
+struct PlanApplyOutcome {
+    outputs: v0::OutputProperties,
+    apply_private: Vec<u8>,
 }
 
 pub struct TfPluginProvider {
@@ -38,9 +47,12 @@ impl ResourceProvider for TfPluginProvider {
     ) -> Result<v0::CreateResourceResponse> {
         let type_name = request.type_.0.clone();
         let inputs_json = properties_to_cty_json(request.input_properties.0)?;
-        let outputs = self.plan_and_apply(&type_name, None, inputs_json).await?;
+        let outcome = self
+            .plan_and_apply(&type_name, None, Vec::new(), inputs_json)
+            .await?;
         Ok(v0::CreateResourceResponse {
-            output_properties: outputs,
+            output_properties: outcome.outputs,
+            private_state: private_state::encode(outcome.apply_private).map(v0::PrivateState),
         })
     }
 
@@ -50,15 +62,17 @@ impl ResourceProvider for TfPluginProvider {
     ) -> Result<v0::UpdateResourceResponse> {
         let type_name = request.resource.type_.0.clone();
         let new_inputs_json = properties_to_cty_json(request.input_properties.0)?;
+        let prior_private = private_state::decode(request.resource.private_state.map(|p| p.0))?;
         let prior = PriorState {
             inputs: request.resource.input_properties.0,
             outputs: request.resource.output_properties.map(|op| op.0),
         };
-        let outputs = self
-            .plan_and_apply(&type_name, Some(prior), new_inputs_json)
+        let outcome = self
+            .plan_and_apply(&type_name, Some(prior), prior_private, new_inputs_json)
             .await?;
         Ok(v0::UpdateResourceResponse {
-            output_properties: outputs,
+            output_properties: outcome.outputs,
+            private_state: private_state::encode(outcome.apply_private).map(v0::PrivateState),
         })
     }
 
@@ -67,6 +81,7 @@ impl ResourceProvider for TfPluginProvider {
         request: v0::DestroyResourceRequest,
     ) -> Result<v0::DestroyResourceResponse> {
         let type_name = request.resource.type_.0.clone();
+        let prior_private = private_state::decode(request.resource.private_state.map(|p| p.0))?;
         let prior = PriorState {
             inputs: request.resource.input_properties.0,
             outputs: request.resource.output_properties.map(|op| op.0),
@@ -75,9 +90,10 @@ impl ResourceProvider for TfPluginProvider {
         // = `planned_state` = `config` = cty null. The provider echoes
         // that null through to `new_state`, and any output properties
         // the provider might have returned are discarded — nixops4
-        // will drop the resource from state.
+        // will drop the resource from state. The `private` bytes are
+        // likewise discarded: the resource is gone.
         let _ = self
-            .plan_and_apply(&type_name, Some(prior), b"null".to_vec())
+            .plan_and_apply(&type_name, Some(prior), prior_private, b"null".to_vec())
             .await?;
         Ok(v0::DestroyResourceResponse {})
     }
@@ -91,10 +107,12 @@ impl TfPluginProvider {
         &self,
         type_name: &str,
         prior: Option<PriorState>,
+        prior_private: Vec<u8>,
         inputs_json: Vec<u8>,
-    ) -> Result<v0::OutputProperties> {
+    ) -> Result<PlanApplyOutcome> {
         let client = ProviderClient::launch(&self.provider_exe).await?;
-        let result = plan_and_apply_inner(&client, type_name, prior, inputs_json).await;
+        let result =
+            plan_and_apply_inner(&client, type_name, prior, prior_private, inputs_json).await;
         client.shutdown().await?;
         result
     }
@@ -104,8 +122,9 @@ async fn plan_and_apply_inner(
     client: &ProviderClient,
     type_name: &str,
     prior: Option<PriorState>,
+    prior_private: Vec<u8>,
     inputs_json: Vec<u8>,
-) -> Result<v0::OutputProperties> {
+) -> Result<PlanApplyOutcome> {
     // Schema is fetched once per adapter invocation. Both the
     // projection of `new_state` onto declared computed outputs and
     // the stripping of write_only attributes from `prior_state` need
@@ -148,6 +167,7 @@ async fn plan_and_apply_inner(
             prior_state_json.clone(),
             inputs_json.clone(),
             inputs_json.clone(),
+            prior_private,
         )
         .await?;
     let planned_state = plan
@@ -166,7 +186,10 @@ async fn plan_and_apply_inner(
     let new_state = apply.new_state.context("provider returned no new_state")?;
 
     let outputs = project_new_state(&schema, type_name, &new_state.json)?;
-    Ok(v0::OutputProperties(outputs))
+    Ok(PlanApplyOutcome {
+        outputs: v0::OutputProperties(outputs),
+        apply_private: apply.private,
+    })
 }
 
 fn properties_to_cty_json(props: Map<String, Value>) -> Result<Vec<u8>> {
