@@ -592,6 +592,31 @@ func (p *fixtureProvider) GetProviderSchema(context.Context, *tfprotov6.GetProvi
 					},
 				},
 			},
+			// Reads an environment variable at Plan time and echoes
+			// its value into the computed `value` output. Lets a test
+			// prove env vars inherit through nixops4 → adapter →
+			// provider (real providers rely on this for credentials).
+			"fx_env_echo": {
+				Version: 0,
+				Block: &tfprotov6.SchemaBlock{
+					Attributes: []*tfprotov6.SchemaAttribute{
+						{
+							Name:            "var_name",
+							Type:            tftypes.String,
+							Required:        true,
+							Description:     "Name of the environment variable to read.",
+							DescriptionKind: tfprotov6.StringKindPlain,
+						},
+						{
+							Name:            "value",
+							Type:            tftypes.String,
+							Computed:        true,
+							Description:     "Value of the environment variable as seen by the provider process.",
+							DescriptionKind: tfprotov6.StringKindPlain,
+						},
+					},
+				},
+			},
 			// Round-trips the tfplugin `private` cookie so tests can
 			// prove the adapter persists Apply.private and feeds it
 			// back as Plan.prior_private on the next cycle.
@@ -794,6 +819,18 @@ func (p *fixtureProvider) PlanResourceChange(_ context.Context, req *tfprotov6.P
 			}, nil
 		}
 		planned = enriched
+	case "fx_env_echo":
+		enriched, err := planFxEnvEcho(req.ProposedNewState)
+		if err != nil {
+			return &tfprotov6.PlanResourceChangeResponse{
+				Diagnostics: []*tfprotov6.Diagnostic{{
+					Severity: tfprotov6.DiagnosticSeverityError,
+					Summary:  "planFxEnvEcho",
+					Detail:   err.Error(),
+				}},
+			}, nil
+		}
+		planned = enriched
 	case "fx_computed_block_attr":
 		enriched, err := planFxComputedBlockAttr(req.ProposedNewState)
 		if err != nil {
@@ -910,6 +947,30 @@ func planFxComputed(pns *tfprotov6.DynamicValue) (*tfprotov6.DynamicValue, error
 	}
 	value, _ := m["value"].(string)
 	m["id"] = "computed-" + value
+	out, err := json.Marshal(m)
+	if err != nil {
+		return nil, err
+	}
+	return &tfprotov6.DynamicValue{JSON: out}, nil
+}
+
+// planFxEnvEcho reads the env var named by `var_name` in the proposed
+// state and fills in the computed `value` attribute with what the
+// provider process itself sees for that variable at Plan time.
+// A missing env var maps to an empty string.
+func planFxEnvEcho(pns *tfprotov6.DynamicValue) (*tfprotov6.DynamicValue, error) {
+	if pns == nil || len(pns.JSON) == 0 {
+		return pns, nil
+	}
+	var m map[string]any
+	if err := json.Unmarshal(pns.JSON, &m); err != nil {
+		return nil, err
+	}
+	if m == nil {
+		return pns, nil
+	}
+	name, _ := m["var_name"].(string)
+	m["value"] = os.Getenv(name)
 	out, err := json.Marshal(m)
 	if err != nil {
 		return nil, err

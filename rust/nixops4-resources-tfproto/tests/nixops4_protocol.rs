@@ -298,6 +298,54 @@ async fn destroy_fx_string_via_nixops4_protocol() {
     client.close_wait().await.expect("close adapter");
 }
 
+// #54: env vars must inherit through nixops4 → adapter → provider.
+// Real providers need this for credentials (AWS_*, KUBECONFIG, ...).
+// The chain is subprocess-only and neither hop calls `env_clear`;
+// this test locks that in so a future hermetic-spawn change can't
+// silently break real-provider usage.
+#[tokio::test]
+async fn env_vars_inherit_through_adapter_to_provider() {
+    let Some(fixture) = fixture_path() else {
+        eprintln!("skipping: NIXOPS4_TFPROTO_FIXTURE not set");
+        return;
+    };
+
+    let sentinel_name = "NIXOPS4_TFPROTO_ENV_INHERIT_SENTINEL";
+    let sentinel_value = "carrot-42";
+    // SAFETY: single-threaded tokio test, no other threads read this
+    // var. `std::env::set_var` is unsafe on multi-threaded processes
+    // because it races with libc `getenv` in other threads.
+    unsafe { std::env::set_var(sentinel_name, sentinel_value) };
+
+    let mut client = ResourceProviderClient::new(ResourceProviderConfig {
+        provider_executable: ADAPTER.to_string(),
+        provider_args: vec!["run".to_string(), "--provider-exe".to_string(), fixture],
+    })
+    .await
+    .expect("spawn adapter");
+
+    let mut inputs = Map::new();
+    inputs.insert(
+        "var_name".to_string(),
+        Value::String(sentinel_name.to_string()),
+    );
+
+    let outputs = client
+        .create("fx_env_echo", &inputs, true)
+        .await
+        .expect("create fx_env_echo")
+        .output_properties;
+
+    assert_eq!(
+        outputs.get("value"),
+        Some(&Value::String(sentinel_value.to_string())),
+        "provider must see the sentinel env var set by the test; got {:?}",
+        outputs
+    );
+
+    client.close_wait().await.expect("close adapter");
+}
+
 // #40: `private_state` end-to-end. Create must surface a non-None
 // private_state derived from Apply.private. Update must feed that
 // value back so the fixture's Plan sees the previously-emitted bytes
