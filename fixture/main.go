@@ -158,8 +158,8 @@ func (p *fixtureProvider) GetProviderSchema(context.Context, *tfprotov6.GetProvi
 				},
 			},
 			// cty `set(T)` attribute: unordered, unique-valued
-			// collection. On the wire it's shaped like a list; the
-			// semantic difference lives in the type tag.
+			// collection. Serialised as a JSON list; the semantic
+			// difference lives in the type tag.
 			"fx_set_string": {
 				Version: 0,
 				Block: &tfprotov6.SchemaBlock{
@@ -859,7 +859,7 @@ func (p *fixtureProvider) PlanResourceChange(_ context.Context, req *tfprotov6.P
 }
 
 // dieParams controls the fx_die fixture: which RPC exits, and with
-// what status. The fields are wire-visible attributes on the schema.
+// what status. The fields are declared as attributes on the schema.
 type dieParams struct {
 	CrashingOperation string `json:"crashing_operation"`
 	ExitCode          int    `json:"exit_code"`

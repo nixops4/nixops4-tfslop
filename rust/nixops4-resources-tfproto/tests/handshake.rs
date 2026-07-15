@@ -35,7 +35,7 @@ async fn schema_string_attribute_roundtrip() {
     let raw = client.get_provider_schema().await.expect("fetch schema");
     client.shutdown().await.expect("clean shutdown");
 
-    let schema = ProviderSchema::from_wire(raw).expect("parse schema");
+    let schema = ProviderSchema::from_proto(raw).expect("parse schema");
 
     assert!(schema.data_source_schemas.is_empty());
     let rs = schema
@@ -47,8 +47,8 @@ async fn schema_string_attribute_roundtrip() {
     assert!(attr.required);
     assert!(!attr.optional);
     assert!(!attr.computed);
-    // go-cty JSON forwards the type verbatim; a primitive `string` on the
-    // wire is a JSON string, quotes included.
+    // go-cty JSON forwards the type verbatim; a primitive `string` is
+    // serialised as a JSON string, quotes included.
     assert_eq!(attr.cty_type, "\"string\"");
 }
 
@@ -206,8 +206,8 @@ async fn plan_requires_replace_surfaces_paths() {
 // Deferred response combined with our `deferral_allowed = false` and
 // converts it to an Error diagnostic naming the reason, which
 // `check_diagnostics` already surfaces. The adapter also has a
-// defensive check on the raw `deferred` field for wire-level cases
-// where the SDK guard doesn't fire.
+// defensive check on the raw `deferred` field for cases where the
+// SDK guard doesn't fire.
 //
 // Two reasons are probed so a hardcoded string in the adapter's
 // output can't satisfy both.

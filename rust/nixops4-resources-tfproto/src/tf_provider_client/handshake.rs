@@ -48,7 +48,7 @@ pub(crate) fn validate(h: &HandshakeInfo) -> Result<()> {
         );
     }
     if h.protocol != "grpc" {
-        bail!("unsupported wire protocol: {} (expected grpc)", h.protocol);
+        bail!("unsupported protocol: {} (expected grpc)", h.protocol);
     }
     match h.network_type.as_str() {
         "tcp" | "unix" => {}

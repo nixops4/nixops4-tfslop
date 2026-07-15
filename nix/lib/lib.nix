@@ -5,15 +5,14 @@ let
 
   # Map a go-cty JSON-encoded type to a NixOS module option type.
   #
-  # The `type` field on the wire is the JSON encoding produced by
-  # go-cty's `cty.Type` marshaller: primitives are JSON strings
-  # (`"string"`, quotes included), composites are JSON arrays
-  # (`["list","string"]`, `["object",{…}]`). See
-  # <https://github.com/zclconf/go-cty> and
+  # The `type` field is produced by go-cty's `cty.Type` marshaller:
+  # primitives are JSON strings (`"string"`, quotes included),
+  # composites are JSON arrays (`["list","string"]`,
+  # `["object",{…}]`). See <https://github.com/zclconf/go-cty> and
   # <https://github.com/zclconf/go-cty/blob/main/cty/json/marshal.go>
   # (`MarshalType` / `UnmarshalType`).
   #
-  # Parse the wire JSON once, then dispatch structurally on the parsed
+  # Parse the JSON once, then dispatch structurally on the parsed
   # value — otherwise the primitive arms compare against string
   # literals like `"\"string\""` and composite arms would have to
   # branch on prefix substrings, which is ugly.
@@ -65,10 +64,10 @@ let
     then
       types.listOf types.raw
     # cty `object` type: the attribute's *value* is a fixed-shape
-    # struct. The wire encoding is `["object", {field: type, …}]`.
+    # struct. Serialised as `["object", {field: type, …}]`.
     # Structurally the same target as a Single-nesting block minus
-    # the nullability wrapper — one attribute entry, one atomic
-    # value, but named sub-fields at declared types.
+    # the `nullOr` — one attribute entry, one atomic value, but
+    # named sub-fields at declared types.
     else if
       builtins.isList parsed && builtins.length parsed == 2 && builtins.head parsed == "object"
     then
@@ -86,7 +85,7 @@ let
     else
       throw "tfCommonSchemaToModule: unsupported cty type ${builtins.toJSON parsed}";
 
-  # A parsed cty type is a set iff its wire encoding starts with "set".
+  # A parsed cty type is a set iff its serialisation starts with "set".
   # Used to attach `apply = lib.unique` on options whose value is a
   # set — nixpkgs has no set type, so the canonicalisation happens at
   # the option level.
@@ -164,7 +163,7 @@ let
   # Nested blocks recurse into their own inner block; the inner block
   # may itself have attributes and further nested blocks.
   #
-  # `min_items = 0` (the default, omitted on the wire) marks the block
+  # `min_items = 0` (the default, omitted from the schema) marks the block
   # as optional: Single becomes `nullOr submodule` with `default null`,
   # List becomes `listOf submodule` with `default [ ]`. `min_items >= 1`
   # drops the default so the user must supply a value.

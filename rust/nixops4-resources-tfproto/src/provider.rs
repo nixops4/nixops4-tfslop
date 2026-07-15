@@ -130,7 +130,7 @@ async fn plan_and_apply_inner(
     // the stripping of write_only attributes from `prior_state` need
     // it — we cannot reliably identify either without the schema.
     let raw_schema = client.get_provider_schema().await?;
-    let schema = ProviderSchema::from_wire(raw_schema)?;
+    let schema = ProviderSchema::from_proto(raw_schema)?;
 
     let prior_state_json = match prior {
         None => b"null".to_vec(),

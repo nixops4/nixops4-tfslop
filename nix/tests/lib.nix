@@ -116,8 +116,9 @@ let
         ];
       }).config.value
     );
-  # Feed a list with duplicates: the apply-time dedup must canonicalise
-  # it so the on-wire value doesn't carry noise into state diffs.
+  # Feed a list with duplicates: the apply-time dedup must
+  # canonicalise it so the serialised value doesn't carry noise
+  # into state diffs.
   materialisedSet =
     (lib.evalModules {
       modules = [

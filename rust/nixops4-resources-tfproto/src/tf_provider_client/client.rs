@@ -436,9 +436,9 @@ fn check_requires_replace(paths: &[tfplugin6::AttributePath]) -> Result<()> {
 ///
 /// A well-behaved SDK-based provider won't send Deferred to us — the
 /// SDK converts a mismatched Deferred into an error diagnostic that
-/// `check_diagnostics` already handles. This function is the wire-
-/// level fallback for a non-SDK provider (or a future SDK that drops
-/// the guard).
+/// `check_diagnostics` already handles. This function is the
+/// protocol-level fallback for a non-SDK provider (or a future SDK
+/// that drops the guard).
 fn check_deferred(deferred: Option<&tfplugin6::Deferred>, rpc: &str) -> Result<()> {
     if let Some(d) = deferred {
         bail!(

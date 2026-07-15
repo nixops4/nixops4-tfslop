@@ -61,7 +61,7 @@ async fn cmd_schema(provider_exe: &str) -> Result<()> {
     // Shutdown must happen even on error to avoid leaking the child.
     let result = async {
         let raw = client.get_provider_schema().await?;
-        let schema = ProviderSchema::from_wire(raw)?;
+        let schema = ProviderSchema::from_proto(raw)?;
         println!(
             "{}",
             serde_json::to_string_pretty(&schema).context("serialising schema")?

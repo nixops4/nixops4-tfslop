@@ -121,26 +121,30 @@ fn is_false(b: &bool) -> bool {
 pub type CtyType = String;
 
 impl ProviderSchema {
-    pub fn from_wire(resp: tfplugin6::get_provider_schema::Response) -> Result<Self> {
+    pub fn from_proto(resp: tfplugin6::get_provider_schema::Response) -> Result<Self> {
         Ok(ProviderSchema {
             resource_schemas: resp
                 .resource_schemas
                 .into_iter()
-                .map(|(name, schema)| ResourceSchema::from_wire(&name, schema).map(|rs| (name, rs)))
+                .map(|(name, schema)| {
+                    ResourceSchema::from_proto(&name, schema).map(|rs| (name, rs))
+                })
                 .collect::<Result<_>>()?,
             data_source_schemas: resp
                 .data_source_schemas
                 .into_iter()
-                .map(|(name, schema)| ResourceSchema::from_wire(&name, schema).map(|rs| (name, rs)))
+                .map(|(name, schema)| {
+                    ResourceSchema::from_proto(&name, schema).map(|rs| (name, rs))
+                })
                 .collect::<Result<_>>()?,
         })
     }
 }
 
 impl ResourceSchema {
-    fn from_wire(type_name: &str, schema: tfplugin6::Schema) -> Result<Self> {
+    fn from_proto(type_name: &str, schema: tfplugin6::Schema) -> Result<Self> {
         let block = match schema.block {
-            Some(b) => Block::from_wire(type_name, b)?,
+            Some(b) => Block::from_proto(type_name, b)?,
             None => Block::empty(),
         };
         Ok(ResourceSchema { block })
@@ -156,13 +160,13 @@ impl Block {
         }
     }
 
-    fn from_wire(type_name: &str, block: tfplugin6::schema::Block) -> Result<Self> {
+    fn from_proto(type_name: &str, block: tfplugin6::schema::Block) -> Result<Self> {
         let attributes = block
             .attributes
             .into_iter()
             .map(|a| {
                 let name = a.name.clone();
-                Attribute::from_wire(type_name, a).map(|attr| (name, attr))
+                Attribute::from_proto(type_name, a).map(|attr| (name, attr))
             })
             .collect::<Result<_>>()?;
         let block_types = block
@@ -170,7 +174,7 @@ impl Block {
             .into_iter()
             .map(|nb| {
                 let name = nb.type_name.clone();
-                BlockType::from_wire(type_name, nb).map(|bt| (name, bt))
+                BlockType::from_proto(type_name, nb).map(|bt| (name, bt))
             })
             .collect::<Result<_>>()?;
         Ok(Block {
@@ -182,12 +186,12 @@ impl Block {
 }
 
 impl BlockType {
-    fn from_wire(parent: &str, nb: tfplugin6::schema::NestedBlock) -> Result<Self> {
-        let nesting = NestingMode::from_wire(nb.nesting);
+    fn from_proto(parent: &str, nb: tfplugin6::schema::NestedBlock) -> Result<Self> {
+        let nesting = NestingMode::from_proto(nb.nesting);
         let inner_block = nb
             .block
             .with_context(|| format!("block {}.{} has no inner block", parent, nb.type_name))?;
-        let block = Block::from_wire(&format!("{}.{}", parent, nb.type_name), inner_block)?;
+        let block = Block::from_proto(&format!("{}.{}", parent, nb.type_name), inner_block)?;
         Ok(BlockType {
             nesting,
             min_items: nb.min_items,
@@ -198,7 +202,7 @@ impl BlockType {
 }
 
 impl NestingMode {
-    fn from_wire(nesting: i32) -> Self {
+    fn from_proto(nesting: i32) -> Self {
         use tfplugin6::schema::nested_block::NestingMode as W;
         match W::try_from(nesting) {
             Ok(W::Single) => NestingMode::Single,
@@ -212,7 +216,7 @@ impl NestingMode {
 }
 
 impl Attribute {
-    fn from_wire(type_name: &str, a: tfplugin6::schema::Attribute) -> Result<Self> {
+    fn from_proto(type_name: &str, a: tfplugin6::schema::Attribute) -> Result<Self> {
         // go-cty JSON is JSON, which the spec requires to be UTF-8. A
         // provider that violates that is broken; surface immediately.
         let cty_type = String::from_utf8(a.r#type).with_context(|| {
