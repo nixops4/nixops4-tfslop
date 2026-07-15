@@ -412,6 +412,13 @@
             "computed": false,
             "sensitive": true,
             "description": "A required sensitive string."
+          },
+          "write_to": {
+            "type": "\"string\"",
+            "required": false,
+            "optional": true,
+            "computed": false,
+            "description": "Path to write the observed secret to (itest hook)."
           }
         }
       }

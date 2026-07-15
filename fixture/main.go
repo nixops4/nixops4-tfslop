@@ -639,6 +639,19 @@ func (p *fixtureProvider) GetProviderSchema(context.Context, *tfprotov6.GetProvi
 							DescriptionKind: tfprotov6.StringKindPlain,
 						},
 						{
+							// Optional path the fixture writes the
+							// observed `secret` to on Apply. Lets the
+							// itest prove the provider process saw a
+							// PLAIN value (not a `{_type: sensitive}`
+							// marker), by reading the file back after
+							// nixops4 apply completes.
+							Name:            "write_to",
+							Type:            tftypes.String,
+							Optional:        true,
+							Description:     "Path to write the observed secret to (itest hook).",
+							DescriptionKind: tfprotov6.StringKindPlain,
+						},
+						{
 							Name:            "computed_secret",
 							Type:            tftypes.String,
 							Computed:        true,
@@ -883,6 +896,18 @@ func (p *fixtureProvider) PlanResourceChange(_ context.Context, req *tfprotov6.P
 			}, nil
 		}
 		plannedPrivate = bytes
+	case "fx_sensitive":
+		enriched, err := planFxSensitive(req.ProposedNewState)
+		if err != nil {
+			return &tfprotov6.PlanResourceChangeResponse{
+				Diagnostics: []*tfprotov6.Diagnostic{{
+					Severity: tfprotov6.DiagnosticSeverityError,
+					Summary:  "planFxSensitive",
+					Detail:   err.Error(),
+				}},
+			}, nil
+		}
+		planned = enriched
 	}
 	return &tfprotov6.PlanResourceChangeResponse{
 		PlannedState:   planned,
@@ -984,6 +1009,56 @@ func planFxComputed(pns *tfprotov6.DynamicValue) (*tfprotov6.DynamicValue, error
 		return nil, err
 	}
 	return &tfprotov6.DynamicValue{JSON: out}, nil
+}
+
+// planFxSensitive populates the computed sensitive output based on
+// what `secret` came in as. Terraform requires computed values known
+// at Plan to be filled in here so nixops4 sees a determined new_state.
+// The derived value is a simple transform of the input so the itest
+// can assert the marker-wrapped output has the expected inner value.
+func planFxSensitive(pns *tfprotov6.DynamicValue) (*tfprotov6.DynamicValue, error) {
+	if pns == nil || len(pns.JSON) == 0 {
+		return pns, nil
+	}
+	var m map[string]any
+	if err := json.Unmarshal(pns.JSON, &m); err != nil {
+		return nil, err
+	}
+	if m == nil {
+		return pns, nil
+	}
+	secret, _ := m["secret"].(string)
+	m["computed_secret"] = "COMPUTED:" + secret
+	out, err := json.Marshal(m)
+	if err != nil {
+		return nil, err
+	}
+	return &tfprotov6.DynamicValue{JSON: out}, nil
+}
+
+// applyFxSensitive optionally writes the observed `secret` (as JSON)
+// to the path given in `write_to`. The itest points `write_to` at a
+// file in its working directory and inspects the contents to prove
+// the provider saw a PLAIN string, not the `{_type: sensitive}`
+// marker shape that lives on the Nix side.
+func applyFxSensitive(planned *tfprotov6.DynamicValue) error {
+	if planned == nil || len(planned.JSON) == 0 {
+		// Destroy path — no observation to record.
+		return nil
+	}
+	var m map[string]any
+	if err := json.Unmarshal(planned.JSON, &m); err != nil {
+		return err
+	}
+	path, _ := m["write_to"].(string)
+	if path == "" {
+		return nil
+	}
+	payload, err := json.Marshal(m["secret"])
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(path, payload, 0o600)
 }
 
 // planFxEnvEcho reads the env var named by `var_name` in the proposed
@@ -1106,6 +1181,17 @@ func (p *fixtureProvider) ApplyResourceChange(_ context.Context, req *tfprotov6.
 	var private []byte
 	if req.TypeName == "fx_private" {
 		private = req.PlannedPrivate
+	}
+	if req.TypeName == "fx_sensitive" {
+		if err := applyFxSensitive(req.PlannedState); err != nil {
+			return &tfprotov6.ApplyResourceChangeResponse{
+				Diagnostics: []*tfprotov6.Diagnostic{{
+					Severity: tfprotov6.DiagnosticSeverityError,
+					Summary:  "applyFxSensitive",
+					Detail:   err.Error(),
+				}},
+			}, nil
+		}
 	}
 	return &tfprotov6.ApplyResourceChangeResponse{
 		NewState: req.PlannedState,
