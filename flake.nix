@@ -37,7 +37,14 @@
             packages.fixture = pkgs.callPackage ./fixture/package.nix { };
           };
 
-        flake.lib = import ./nix/lib/lib.nix { inherit lib; };
+        flake.lib = import ./nix/lib/lib.nix {
+          inherit lib;
+          # `nixops4Lib` gives the schema translator access to
+          # `nixops4Lib.types.{acceptSensitive,sensitiveOf}`, needed
+          # to generate option types for schema-declared-sensitive
+          # attributes.
+          nixops4Lib = inputs.nixops4.lib;
+        };
 
         # Dev-only tooling is isolated behind a flake-parts partition
         # (see dev/flake-module.nix), so as not to bother consumers.

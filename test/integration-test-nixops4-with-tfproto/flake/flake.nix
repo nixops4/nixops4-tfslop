@@ -54,7 +54,10 @@
 
             # Import the tfproto library directly from its source
             # (see the header comment for why not via flake input).
-            tfLib = import "@nixops4-tfproto-lib@" { inherit lib; };
+            tfLib = import "@nixops4-tfproto-lib@" {
+              inherit lib;
+              nixops4Lib = inputs.nixops4.lib;
+            };
 
             # The tfproto-generated provider module. Skips the schema
             # IFD (already materialised above) and calls the schema →

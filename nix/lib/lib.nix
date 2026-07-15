@@ -1,7 +1,24 @@
 # Public functions exposed as `nixops4-tfproto.lib.<name>`.
-{ lib }:
+{
+  lib,
+  # `nixops4Lib` gives the schema translator access to
+  # `lib.types.{acceptSensitive,sensitiveOf}`, needed to generate
+  # option types for schema-declared-sensitive attributes.
+  nixops4Lib,
+}:
 let
   inherit (lib) mkOption types;
+
+  # Given the tfplugin `sensitive` flag, extend an option type to
+  # demand a sensitive marker (or leave as-is). When the schema
+  # declares `sensitive = true`: compose as
+  # `acceptSensitive (sensitiveOf T)`. Both check branches then
+  # demand a proper sensitive marker, so a plain value is refused.
+  # Non-sensitive slots are passed through unchanged — see task #96
+  # for the (unimplemented) uniform-acceptSensitive variant.
+  applySensitiveFlag =
+    sensitive: t:
+    if sensitive then nixops4Lib.types.acceptSensitive (nixops4Lib.types.sensitiveOf t) else t;
 
   # Map a go-cty JSON-encoded type to a NixOS module option type.
   #
@@ -136,7 +153,7 @@ let
       in
       mkOption (
         {
-          type = ctyParsedToOptionType parsed;
+          type = applySensitiveFlag (attr.sensitive or false) (ctyParsedToOptionType parsed);
           description = if attr.description or "" != "" then attr.description else "Terraform input";
         }
         // ctyApplyForType name parsed
@@ -152,7 +169,7 @@ let
       in
       mkOption (
         {
-          type = ctyParsedToOptionType parsed;
+          type = applySensitiveFlag (attr.sensitive or false) (ctyParsedToOptionType parsed);
           description = if attr.description or "" != "" then attr.description else "Terraform output";
           readOnly = true;
         }
