@@ -101,6 +101,13 @@ pub struct Attribute {
     /// persisted in state. Adapter strips it from `prior_state`.
     #[serde(skip_serializing_if = "is_false", default)]
     pub write_only: bool,
+    /// tfplugin `sensitive`: the attribute's value must not be
+    /// surfaced in logs or display. The Nix side extends the option
+    /// type with `nixops4Lib.types.sensitiveOf` so plain values are
+    /// refused; the adapter wraps the corresponding output field as
+    /// a nixops4 sensitive marker before returning it to nixops4.
+    #[serde(skip_serializing_if = "is_false", default)]
+    pub sensitive: bool,
     /// tfplugin `deprecated`: the attribute should not be used.
     /// Adapter emits a `provider warning:` per hit when the user's
     /// input touches it.
@@ -231,6 +238,7 @@ impl Attribute {
             optional: a.optional,
             computed: a.computed,
             write_only: a.write_only,
+            sensitive: a.sensitive,
             deprecated: a.deprecated,
             description: a.description,
         })

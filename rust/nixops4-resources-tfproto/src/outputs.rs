@@ -152,6 +152,7 @@ mod tests {
             optional: false,
             computed,
             write_only: false,
+            sensitive: false,
             deprecated: false,
             description: String::new(),
         }

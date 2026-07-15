@@ -753,4 +753,23 @@ in
     expr = builtins.length (tryEvalRuleCount "fx_max_list_block" 2).value;
     expected = 2;
   };
+
+  # Sensitive-attribute metadata: the schema serialisation must
+  # propagate `sensitive: true` from tfplugin. Guards against a
+  # regression in the Rust `Attribute::from_proto` mapping.
+  "test sensitive input attribute serialises the flag" = {
+    expr = fixtureSchema.resource_schemas.fx_sensitive.block.attributes.secret.sensitive or false;
+    expected = true;
+  };
+  "test sensitive computed attribute serialises the flag" = {
+    expr =
+      fixtureSchema.resource_schemas.fx_sensitive.block.attributes.computed_secret.sensitive or false;
+    expected = true;
+  };
+  "test non-sensitive attribute omits the sensitive flag" = {
+    # Match the shape of other bool flags (write_only, deprecated):
+    # omit when false so the schema JSON stays compact.
+    expr = fixtureSchema.resource_schemas.fx_string.block.attributes.value ? sensitive;
+    expected = false;
+  };
 }

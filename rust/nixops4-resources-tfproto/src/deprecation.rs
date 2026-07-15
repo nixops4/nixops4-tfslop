@@ -95,6 +95,7 @@ mod tests {
             optional: true,
             computed: false,
             write_only: false,
+            sensitive: false,
             deprecated,
             description: String::new(),
         }

@@ -617,6 +617,38 @@ func (p *fixtureProvider) GetProviderSchema(context.Context, *tfprotov6.GetProvi
 					},
 				},
 			},
+			// Sensitive-attribute metadata: `secret` is flagged
+			// `Sensitive: true` at the tfplugin layer. The adapter
+			// must propagate that flag into its JSON schema and the
+			// Nix side must extend the corresponding option type
+			// with `sensitiveOf types.str` so a plain string is
+			// rejected and only lib.sensitive-marked values are
+			// accepted. `computed_secret` exercises the output
+			// side: the adapter constructs a sensitive marker
+			// around the plain value the provider returns.
+			"fx_sensitive": {
+				Version: 0,
+				Block: &tfprotov6.SchemaBlock{
+					Attributes: []*tfprotov6.SchemaAttribute{
+						{
+							Name:            "secret",
+							Type:            tftypes.String,
+							Required:        true,
+							Sensitive:       true,
+							Description:     "A required sensitive string.",
+							DescriptionKind: tfprotov6.StringKindPlain,
+						},
+						{
+							Name:            "computed_secret",
+							Type:            tftypes.String,
+							Computed:        true,
+							Sensitive:       true,
+							Description:     "A provider-computed sensitive string.",
+							DescriptionKind: tfprotov6.StringKindPlain,
+						},
+					},
+				},
+			},
 			// Round-trips the tfplugin `private` cookie so tests can
 			// prove the adapter persists Apply.private and feeds it
 			// back as Plan.prior_private on the next cycle.

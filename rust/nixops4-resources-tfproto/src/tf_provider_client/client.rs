@@ -34,8 +34,9 @@ fn announced_client_capabilities() -> tfplugin6::ClientCapabilities {
 }
 
 /// How long shutdown waits for the child to exit after StopProvider
-/// + channel close + SIGTERM before escalating to SIGKILL. Providers
-/// that need longer to flush state can be revisited when we see one.
+/// plus channel close plus SIGTERM, before escalating to SIGKILL.
+/// Providers that need longer to flush state can be revisited when
+/// we see one.
 const SHUTDOWN_GRACE: Duration = Duration::from_secs(3);
 
 /// A live provider process and the gRPC channel talking to it.
