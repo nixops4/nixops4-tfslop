@@ -775,4 +775,28 @@ in
     expr = fixtureSchema.resource_schemas.fx_string.block.attributes.value ? sensitive;
     expected = false;
   };
+
+  # Nix-side option-type generation: an attribute whose schema
+  # declares `sensitive: true` must land as `sensitiveOf T`
+  # downstream (composed with `acceptSensitive` on the outer layer),
+  # so only proper sensitive markers are accepted. Non-sensitive
+  # slots stay at their bare inner type.
+  "test sensitive input attribute type description names 'sensitive string'" = {
+    expr =
+      (lib.evalModules {
+        modules = [ cfg.resourceTypes.fx_sensitive.inputs ];
+      }).options.secret.type.description;
+    expected = "sensitive string";
+  };
+  "test non-sensitive input attribute type description is bare 'string'" = {
+    expr = fxStringInputOptions.value.type.description;
+    expected = "string";
+  };
+  "test sensitive computed output type description names 'sensitive string'" = {
+    expr =
+      (lib.evalModules {
+        modules = [ cfg.resourceTypes.fx_sensitive.outputs ];
+      }).options.computed_secret.type.description;
+    expected = "sensitive string";
+  };
 }
