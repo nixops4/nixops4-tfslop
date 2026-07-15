@@ -1,0 +1,528 @@
+{
+  "resource_schemas": {
+    "fx_bool": {
+      "block": {
+        "attributes": {
+          "value": {
+            "type": "\"bool\"",
+            "required": true,
+            "optional": false,
+            "computed": false,
+            "description": "A required bool. Echoed back on create."
+          }
+        }
+      }
+    },
+    "fx_check_write_only_capability": {
+      "block": {
+        "attributes": {}
+      }
+    },
+    "fx_computed": {
+      "block": {
+        "attributes": {
+          "id": {
+            "type": "\"string\"",
+            "required": false,
+            "optional": false,
+            "computed": true,
+            "description": "Provider-issued identifier."
+          },
+          "value": {
+            "type": "\"string\"",
+            "required": false,
+            "optional": true,
+            "computed": false,
+            "description": "User input; echoed into id."
+          }
+        }
+      }
+    },
+    "fx_computed_block_attr": {
+      "block": {
+        "attributes": {},
+        "block_types": {
+          "settings": {
+            "nesting": "Single",
+            "block": {
+              "attributes": {
+                "endpoint": {
+                  "type": "\"string\"",
+                  "required": true,
+                  "optional": false,
+                  "computed": false,
+                  "description": "Where to talk to."
+                },
+                "token": {
+                  "type": "\"string\"",
+                  "required": false,
+                  "optional": false,
+                  "computed": true,
+                  "description": "Provider-issued token."
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "fx_defer": {
+      "block": {
+        "attributes": {
+          "deferring_operation": {
+            "type": "\"string\"",
+            "required": true,
+            "optional": false,
+            "computed": false,
+            "description": "\"plan\" or \"apply\"."
+          },
+          "reason": {
+            "type": "\"string\"",
+            "required": true,
+            "optional": false,
+            "computed": false,
+            "description": "One of RESOURCE_CONFIG_UNKNOWN, PROVIDER_CONFIG_UNKNOWN, ABSENT_PREREQ."
+          }
+        }
+      }
+    },
+    "fx_die": {
+      "block": {
+        "attributes": {
+          "crashing_operation": {
+            "type": "\"string\"",
+            "required": true,
+            "optional": false,
+            "computed": false,
+            "description": "\"plan\" or \"apply\"."
+          },
+          "exit_code": {
+            "type": "\"number\"",
+            "required": true,
+            "optional": false,
+            "computed": false,
+            "description": "Status the fixture calls os.Exit with."
+          }
+        }
+      }
+    },
+    "fx_dynamic": {
+      "block": {
+        "attributes": {
+          "value": {
+            "type": "\"dynamic\"",
+            "required": true,
+            "optional": false,
+            "computed": false,
+            "description": "A required dynamic (any-shape) value."
+          }
+        }
+      }
+    },
+    "fx_env_echo": {
+      "block": {
+        "attributes": {
+          "value": {
+            "type": "\"string\"",
+            "required": false,
+            "optional": false,
+            "computed": true,
+            "description": "Value of the environment variable as seen by the provider process."
+          },
+          "var_name": {
+            "type": "\"string\"",
+            "required": true,
+            "optional": false,
+            "computed": false,
+            "description": "Name of the environment variable to read."
+          }
+        }
+      }
+    },
+    "fx_hang_on_plan": {
+      "block": {
+        "attributes": {}
+      }
+    },
+    "fx_list_block": {
+      "block": {
+        "attributes": {},
+        "block_types": {
+          "rule": {
+            "nesting": "List",
+            "block": {
+              "attributes": {
+                "name": {
+                  "type": "\"string\"",
+                  "required": true,
+                  "optional": false,
+                  "computed": false,
+                  "description": "Rule name."
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "fx_list_string": {
+      "block": {
+        "attributes": {
+          "value": {
+            "type": "[\"list\",\"string\"]",
+            "required": true,
+            "optional": false,
+            "computed": false,
+            "description": "A required list of strings. Echoed back on create."
+          }
+        }
+      }
+    },
+    "fx_map_block": {
+      "block": {
+        "attributes": {},
+        "block_types": {
+          "role": {
+            "nesting": "Map",
+            "block": {
+              "attributes": {
+                "arn": {
+                  "type": "\"string\"",
+                  "required": true,
+                  "optional": false,
+                  "computed": false,
+                  "description": "Role ARN."
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "fx_map_string": {
+      "block": {
+        "attributes": {
+          "value": {
+            "type": "[\"map\",\"string\"]",
+            "required": true,
+            "optional": false,
+            "computed": false,
+            "description": "A required map of strings."
+          }
+        }
+      }
+    },
+    "fx_max_list_block": {
+      "block": {
+        "attributes": {},
+        "block_types": {
+          "rule": {
+            "nesting": "List",
+            "max_items": 2,
+            "block": {
+              "attributes": {
+                "name": {
+                  "type": "\"string\"",
+                  "required": true,
+                  "optional": false,
+                  "computed": false,
+                  "description": "Rule name."
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "fx_min_list_block": {
+      "block": {
+        "attributes": {},
+        "block_types": {
+          "rule": {
+            "nesting": "List",
+            "min_items": 2,
+            "block": {
+              "attributes": {
+                "name": {
+                  "type": "\"string\"",
+                  "required": true,
+                  "optional": false,
+                  "computed": false,
+                  "description": "Rule name."
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "fx_needs_replace": {
+      "block": {
+        "attributes": {
+          "value": {
+            "type": "\"string\"",
+            "required": true,
+            "optional": false,
+            "computed": false,
+            "description": "Provider will demand replace on any change."
+          }
+        }
+      }
+    },
+    "fx_nested_blocks": {
+      "block": {
+        "attributes": {},
+        "block_types": {
+          "outer": {
+            "nesting": "Single",
+            "block": {
+              "attributes": {},
+              "block_types": {
+                "inner": {
+                  "nesting": "Single",
+                  "block": {
+                    "attributes": {
+                      "value": {
+                        "type": "\"string\"",
+                        "required": true,
+                        "optional": false,
+                        "computed": false,
+                        "description": "Innermost required string."
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "fx_number": {
+      "block": {
+        "attributes": {
+          "value": {
+            "type": "\"number\"",
+            "required": true,
+            "optional": false,
+            "computed": false,
+            "description": "A required number. Echoed back on create."
+          }
+        }
+      }
+    },
+    "fx_object": {
+      "block": {
+        "attributes": {
+          "settings": {
+            "type": "[\"object\",{\"endpoint\":\"string\",\"port\":\"number\"}]",
+            "required": true,
+            "optional": false,
+            "computed": false,
+            "description": "A required object attribute."
+          }
+        }
+      }
+    },
+    "fx_optional_block_attr": {
+      "block": {
+        "attributes": {},
+        "block_types": {
+          "settings": {
+            "nesting": "Single",
+            "block": {
+              "attributes": {
+                "endpoint": {
+                  "type": "\"string\"",
+                  "required": false,
+                  "optional": true,
+                  "computed": false,
+                  "description": "Where to talk to (optional)."
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "fx_private": {
+      "block": {
+        "attributes": {
+          "expected_prior_b64": {
+            "type": "\"string\"",
+            "required": false,
+            "optional": true,
+            "computed": false,
+            "description": "If set, Plan asserts base64(prior_private) equals this value."
+          },
+          "is_destroy_probe": {
+            "type": "\"bool\"",
+            "required": false,
+            "optional": true,
+            "computed": false,
+            "description": "If set on prior_state, destroy asserts prior_private is non-empty."
+          },
+          "token": {
+            "type": "\"string\"",
+            "required": true,
+            "optional": false,
+            "computed": false,
+            "description": "Value the fixture writes into planned_private (as `private-for-<token>`)."
+          }
+        }
+      }
+    },
+    "fx_required_single_block": {
+      "block": {
+        "attributes": {},
+        "block_types": {
+          "settings": {
+            "nesting": "Single",
+            "min_items": 1,
+            "block": {
+              "attributes": {
+                "endpoint": {
+                  "type": "\"string\"",
+                  "required": true,
+                  "optional": false,
+                  "computed": false,
+                  "description": "Where to talk to."
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "fx_sensitive": {
+      "block": {
+        "attributes": {
+          "computed_secret": {
+            "type": "\"string\"",
+            "required": false,
+            "optional": false,
+            "computed": true,
+            "sensitive": true,
+            "description": "A provider-computed sensitive string."
+          },
+          "secret": {
+            "type": "\"string\"",
+            "required": true,
+            "optional": false,
+            "computed": false,
+            "sensitive": true,
+            "description": "A required sensitive string."
+          }
+        }
+      }
+    },
+    "fx_set_block": {
+      "block": {
+        "attributes": {},
+        "block_types": {
+          "rule": {
+            "nesting": "Set",
+            "block": {
+              "attributes": {
+                "name": {
+                  "type": "\"string\"",
+                  "required": true,
+                  "optional": false,
+                  "computed": false,
+                  "description": "Rule name."
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "fx_set_string": {
+      "block": {
+        "attributes": {
+          "value": {
+            "type": "[\"set\",\"string\"]",
+            "required": true,
+            "optional": false,
+            "computed": false,
+            "description": "A required set of strings."
+          }
+        }
+      }
+    },
+    "fx_single_block": {
+      "block": {
+        "attributes": {},
+        "block_types": {
+          "settings": {
+            "nesting": "Single",
+            "block": {
+              "attributes": {
+                "endpoint": {
+                  "type": "\"string\"",
+                  "required": true,
+                  "optional": false,
+                  "computed": false,
+                  "description": "Where to talk to."
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "fx_string": {
+      "block": {
+        "attributes": {
+          "value": {
+            "type": "\"string\"",
+            "required": true,
+            "optional": false,
+            "computed": false,
+            "description": "A required string. Echoed back on create."
+          }
+        }
+      }
+    },
+    "fx_tuple": {
+      "block": {
+        "attributes": {
+          "value": {
+            "type": "[\"tuple\",[\"string\",\"number\",\"bool\"]]",
+            "required": true,
+            "optional": false,
+            "computed": false,
+            "description": "A required (string, number, bool) tuple."
+          }
+        }
+      }
+    },
+    "fx_validate_always_rejects": {
+      "block": {
+        "attributes": {}
+      }
+    },
+    "fx_write_only": {
+      "block": {
+        "attributes": {
+          "secret": {
+            "type": "\"string\"",
+            "required": false,
+            "optional": true,
+            "computed": false,
+            "write_only": true,
+            "description": "Write-only secret; never persisted."
+          },
+          "value": {
+            "type": "\"string\"",
+            "required": false,
+            "optional": true,
+            "computed": false,
+            "description": "Persistent user input."
+          }
+        }
+      }
+    }
+  },
+  "data_source_schemas": {}
+}
