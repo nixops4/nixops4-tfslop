@@ -30,6 +30,32 @@
         nixops4 = inputs.nixops4;
       };
 
+      # End-to-end proof that `nixops4 apply` works against a
+      # tfproto-generated provider. Later commits extend this itest
+      # with feature-specific scenarios (sensitive round-trip, etc.)
+      # rather than each feature building its own infrastructure.
+      checks.itest-nixops4-with-tfproto =
+        pkgs.callPackage ../test/integration-test-nixops4-with-tfproto/check.nix
+          {
+            inherit inputs;
+            nixops4 = inputs'.nixops4.packages.nixops4;
+            flake-in-a-bottle = inputs'.nixops4.packages.flake-in-a-bottle;
+            die = inputs'.nixops4.packages.die;
+            adapter = config.packages.default;
+            fixture = config.packages.fixture;
+            # Only the lib module is needed at eval time inside the
+            # sandbox flake — see the flake stub's header for why we
+            # avoid exposing tfproto as a flake input.
+            nixops4-tfproto-lib = ../nix/lib/lib.nix;
+            # Materialise the schema once, outside the sandbox where
+            # network is available.
+            fixture-schema = self.lib.materialiseProviderSchema {
+              inherit (pkgs) runCommand;
+              adapterExecutable = "${config.packages.default}/bin/nixops4-resources-tfproto";
+              providerExecutable = "${config.packages.fixture}/bin/fixture";
+            };
+          };
+
       # Guard against silent drift between the snapshot the nix-unit
       # tests read and the fixture provider's live schema.
       checks.fixture-schema-snapshot =
