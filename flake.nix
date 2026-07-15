@@ -5,11 +5,6 @@
     flake-parts.url = "github:hercules-ci/flake-parts";
     nix-cargo-integration.url = "github:yusdacra/nix-cargo-integration";
     nix-cargo-integration.inputs.nixpkgs.follows = "nixpkgs";
-    # Pinned to a `groups` branch on a personal fork that stacks unmerged
-    # prerequisites (chore/error-messages, fix/shutdown-hang,
-    # feat/isOptionalInputName, feat/nixops4-destroy, plus a golden-diff
-    # workaround for render-provider-docs). Repoint to the upstream
-    # commit once these land.
     nixops4.url = "git+https://scratch.notatio.nl/botbot/nixops4?ref=for-tfproto&rev=d9ffb564c59695f941d971e21bab21163457a05a";
     nixpkgs.follows = "nixops4/nixpkgs";
   };
