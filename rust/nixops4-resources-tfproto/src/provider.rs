@@ -11,6 +11,7 @@ use crate::outputs::project_new_state;
 use crate::prior_state::build_prior_state_json;
 use crate::private_state;
 use crate::schema::ProviderSchema;
+use crate::sensitive_markers::wrap_sensitive_outputs;
 use crate::tf_provider_client::ProviderClient;
 
 /// Prior state supplied by the caller. `None` marks a create; the
@@ -186,6 +187,7 @@ async fn plan_and_apply_inner(
     let new_state = apply.new_state.context("provider returned no new_state")?;
 
     let outputs = project_new_state(&schema, type_name, &new_state.json)?;
+    let outputs = wrap_sensitive_outputs(&schema, type_name, outputs)?;
     Ok(PlanApplyOutcome {
         outputs: v0::OutputProperties(outputs),
         apply_private: apply.private,

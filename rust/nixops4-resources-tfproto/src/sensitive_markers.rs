@@ -25,11 +25,35 @@ use crate::schema::ProviderSchema;
 /// Nested-block sensitive attributes are out of scope for this
 /// slice — task #97 tracks the extension.
 pub fn wrap_sensitive_outputs(
-    _schema: &ProviderSchema,
-    _type_name: &str,
-    _outputs: Map<String, Value>,
+    schema: &ProviderSchema,
+    type_name: &str,
+    mut outputs: Map<String, Value>,
 ) -> Result<Map<String, Value>> {
-    todo!("wrap_sensitive_outputs is unimplemented")
+    let Some(resource) = schema.resource_schemas.get(type_name) else {
+        // Unknown resource type — nothing to wrap. The projection
+        // step (called just before us) already surfaces this as an
+        // error where it matters.
+        return Ok(outputs);
+    };
+    for (name, attr) in &resource.block.attributes {
+        if !attr.sensitive {
+            continue;
+        }
+        if let Some(v) = outputs.remove(name) {
+            outputs.insert(name.clone(), mark(v));
+        }
+    }
+    Ok(outputs)
+}
+
+/// Construct the marker shape around `inner`. Provenances stay off
+/// the output — nixops4-eval's `fromSerializable` synthesises a
+/// position-derived provenance on ingress.
+fn mark(inner: Value) -> Value {
+    let mut m = Map::new();
+    m.insert("_type".to_string(), Value::String("sensitive".to_string()));
+    m.insert("value".to_string(), inner);
+    Value::Object(m)
 }
 
 #[cfg(test)]
