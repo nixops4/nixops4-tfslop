@@ -709,7 +709,7 @@ dependencies = [
 [[package]]
 name = "nixops4-resource"
 version = "0.1.0"
-source = "git+https://scratch.notatio.nl/botbot/nixops4.git?rev=190c9e63a6ff3612d0437def1b6fea5843a2a622#190c9e63a6ff3612d0437def1b6fea5843a2a622"
+source = "git+https://scratch.notatio.nl/botbot/nixops4.git?rev=d9ffb564c59695f941d971e21bab21163457a05a#d9ffb564c59695f941d971e21bab21163457a05a"
 dependencies = [
  "anyhow",
  "chrono",
@@ -726,7 +726,7 @@ dependencies = [
 [[package]]
 name = "nixops4-resource-runner"
 version = "0.1.0"
-source = "git+https://scratch.notatio.nl/botbot/nixops4.git?rev=190c9e63a6ff3612d0437def1b6fea5843a2a622#190c9e63a6ff3612d0437def1b6fea5843a2a622"
+source = "git+https://scratch.notatio.nl/botbot/nixops4.git?rev=d9ffb564c59695f941d971e21bab21163457a05a#d9ffb564c59695f941d971e21bab21163457a05a"
 dependencies = [
  "anyhow",
  "clap",
