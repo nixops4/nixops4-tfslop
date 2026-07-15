@@ -96,6 +96,50 @@
                   inputs.initialize_with = members.echo.outputs.id;
                 };
               };
+
+            # Sensitive round-trip. Extends the basic itest with a
+            # scenario that exercises the sensitive-value machinery
+            # end-to-end. The provider process writes the received
+            # `secret` (already revealed by nixops4-resource's
+            # strip on input) to `write_to`, and populates
+            # `computed_secret` with a derived plain string. The
+            # tfproto adapter wraps `computed_secret` as a marker
+            # (based on the schema flag) before returning to
+            # nixops4. Downstream Nix then sees a proper eval-time
+            # marker.
+            members.sensitiveDeployment =
+              { members, ... }:
+              let
+                inherit (inputs.nixops4.lib.sensitive) mkSensitive isSensitive;
+              in
+              {
+                members.state = {
+                  type = providers.local.state_file;
+                  inputs.name = "sensitive-state.json";
+                };
+                members.echo = {
+                  type = providers.tfFixture.fx_sensitive;
+                  state = members.state;
+                  inputs.secret = mkSensitive { provenance = "test-fixture"; } "hunter2";
+                  inputs.write_to = "sensitive-echo-observed.txt";
+                };
+                # Downstream reconstruction check: the memo
+                # persists a corroborating string when
+                # `echo.outputs.computed_secret` reads as a proper
+                # sensitive marker downstream. A throw on the else
+                # branch makes a regression surface at eval time
+                # (visible failure) rather than silently persisting
+                # a plain string.
+                members.echoOutputAssertion = {
+                  type = providers.local.memo;
+                  state = members.state;
+                  inputs.initialize_with =
+                    if isSensitive members.echo.outputs.computed_secret then
+                      "echo.outputs.computed_secret is a proper sensitive marker"
+                    else
+                      throw "REGRESSION: echo.outputs.computed_secret is not a sensitive marker";
+                };
+              };
           };
       }
     );

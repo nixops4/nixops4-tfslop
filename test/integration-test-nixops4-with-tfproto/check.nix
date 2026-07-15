@@ -117,6 +117,148 @@ runCommand "itest-nixops4-with-tfproto"
       rm -f basic-state.json
     )
 
+    h1 SENSITIVE ROUND-TRIP
+    (
+      set -x
+      echo "=== Testing sensitive-value round-trip through a tfproto-generated provider ==="
+
+      # The deployment declares
+      #   secret = mkSensitive {...} "hunter2"
+      # and points `computed_secret` (sensitive-declared output) at
+      # a downstream memo whose input demands a sensitive marker.
+      # Three things must all hold after apply:
+      #
+      # (1) The provider process saw a PLAIN value — proved by
+      #     inspecting the file the fixture writes. This is the
+      #     nixops4-resource framework's `strip_request_markers`
+      #     doing its job on the provider side of the pipe.
+      # (2) State preserves the marker on both sides: `secret`
+      #     (input) AND `computed_secret` (output). The output
+      #     side is what the tfproto adapter's
+      #     `wrap_sensitive_outputs` provides — no
+      #     `improveRawOutputs`; the adapter constructs the marker
+      #     around the plain value the provider returned.
+      # (3) Downstream Nix observed `.outputs.computed_secret` as
+      #     a proper sensitive marker (via the throw-on-else memo
+      #     whose successful evaluation persists a corroborating
+      #     string).
+      nixops4 apply -v sensitiveDeployment --show-trace
+
+      test -f sensitive-echo-observed.txt
+      test -f sensitive-state.json
+
+      # (1) File contents are plain.
+      observed=$(cat sensitive-echo-observed.txt)
+      [[ "$observed" == '"hunter2"' ]] || {
+        echo "FAIL: provider observed unexpected value: $observed"
+        exit 1
+      }
+
+      # (2a) Input side: state preserves a marker for `secret`.
+      jq -es '
+        [.[] | .patch[]?
+               | .. | objects
+               | select(.secret? and (.secret._type? == "sensitive")
+                                  and (.secret.value == "hunter2"))]
+          | length > 0
+      ' sensitive-state.json | grep -q true || {
+        echo "FAIL: no marker-shape sensitive input in state file"
+        cat sensitive-state.json
+        exit 1
+      }
+
+      # (2b) Output side: state preserves a marker for
+      # `computed_secret`. Adapter's `wrap_sensitive_outputs`.
+      jq -es '
+        [.[] | .patch[]?
+               | .. | objects
+               | select(.computed_secret? and (.computed_secret._type? == "sensitive")
+                                           and (.computed_secret.value == "COMPUTED:hunter2"))]
+          | length > 0
+      ' sensitive-state.json | grep -q true || {
+        echo "FAIL: no marker-shape sensitive output in state file"
+        cat sensitive-state.json
+        exit 1
+      }
+
+      # (3) Downstream reconstruction: memo persisted the positive
+      # branch of the throw-on-else check.
+      jq -es '
+        [.[] | .patch[]?
+               | .. | objects
+               | select(.initialize_with?
+                          == "echo.outputs.computed_secret is a proper sensitive marker")]
+          | length > 0
+      ' sensitive-state.json | grep -q true || {
+        echo "FAIL: no evidence of the output-marker assertion firing"
+        cat sensitive-state.json
+        exit 1
+      }
+
+      h2 "=== Rotate the sensitive input, re-apply, expect an Update ==="
+
+      # Rotate the sensitive input by editing the deployment flake in
+      # place. The re-apply drives the fx_sensitive Update path — the
+      # observation file must reflect the new plain value, and the
+      # state's update event must carry both the new input value and
+      # the derived computed_secret.
+      sed -i -e 's/hunter2/newpass/g' flake.nix
+      # Remove the observation file so a passing assertion below
+      # can't be satisfied by the stale Create-time file.
+      rm -f sensitive-echo-observed.txt
+      nixops4 apply -v sensitiveDeployment --show-trace
+
+      test -f sensitive-echo-observed.txt
+      observed=$(cat sensitive-echo-observed.txt)
+      [[ "$observed" == '"newpass"' ]] || {
+        echo "FAIL: rotated input not observed by provider: $observed"
+        exit 1
+      }
+
+      # Shape-agnostic: any string equal to "newpass" appearing
+      # inside an update event's patches proves the rotation
+      # reached state. Deep-diff or full-record replacement both
+      # satisfy this.
+      for expected in newpass COMPUTED:newpass; do
+        jq -es --arg v "$expected" '
+          [.[] | select((.meta.event // "") == "update")
+               | .patch | .. | strings
+               | select(. == $v)]
+            | length > 0
+        ' sensitive-state.json | grep -q true || {
+          echo "FAIL: no update event carrying rotated value '$expected'"
+          cat sensitive-state.json
+          exit 1
+        }
+      done
+
+      h2 "=== Destroy: no leak, state records the removal ==="
+
+      # We only destroy `echo` (the sensitive resource). The memo
+      # `echoOutputAssertion` also lives in state, but the local
+      # provider doesn't implement destroy for `memo`; leaving its
+      # entry stale in state is harmless because we don't re-apply.
+      # Capture stdout+stderr for the leak check.
+      destroy_log=$(mktemp "$TMPDIR/destroy.XXXXXX.log")
+      nixops4 destroy sensitiveDeployment.echo \
+        > >(tee -a "$destroy_log") 2> >(tee -a "$destroy_log" >&2)
+
+      if grep -E 'hunter2|newpass' "$destroy_log"; then
+        echo "FAIL: destroy path leaked a sensitive input value"
+        exit 1
+      fi
+
+      jq -es '
+        [.[] | select((.meta.event // "") == "destroy")] | length >= 1
+      ' sensitive-state.json | grep -q true || {
+        echo "FAIL: expected a destroy event in state"
+        cat sensitive-state.json
+        exit 1
+      }
+
+      rm -f sensitive-echo-observed.txt sensitive-state.json
+    )
+
     h1 SUCCESS
     touch $out
   ''
