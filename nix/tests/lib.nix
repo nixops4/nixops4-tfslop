@@ -799,4 +799,35 @@ in
       }).options.computed_secret.type.description;
     expected = "sensitive string";
   };
+  # Input-side runtime behaviour: the type composition
+  # `acceptSensitive (sensitiveOf T)` should accept a marker and
+  # reject a plain value. Type-description tests above prove the
+  # *shape* of the composition; these prove the check-branch
+  # behaviour.
+  "test sensitive input accepts a lib.sensitive marker" = {
+    expr =
+      let
+        w = nixops4.lib.sensitive.mkSensitive { provenance = "test"; } "hunter2";
+      in
+      nixops4.lib.sensitive.revealSensitiveValue
+        (lib.evalModules {
+          modules = [
+            cfg.resourceTypes.fx_sensitive.inputs
+            { secret = w; }
+          ];
+        }).config.secret;
+    expected = "hunter2";
+  };
+  "test sensitive input rejects a plain string" = {
+    expr =
+      (builtins.tryEval
+        (lib.evalModules {
+          modules = [
+            cfg.resourceTypes.fx_sensitive.inputs
+            { secret = "not-marked"; }
+          ];
+        }).config.secret
+      ).success;
+    expected = false;
+  };
 }
