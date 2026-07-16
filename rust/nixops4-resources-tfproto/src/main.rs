@@ -7,6 +7,12 @@
 //!   translating each NixOps4 request into a tfplugin gRPC sequence
 //!   against the child provider.
 
+// Zero all heap allocations on free. See nixops4's
+// `architecture/threat-model.md`.
+#[global_allocator]
+static ALLOC: zeroizing_alloc::ZeroAlloc<std::alloc::System> =
+    zeroizing_alloc::ZeroAlloc(std::alloc::System);
+
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 use nixops4_resources_tfproto::{
