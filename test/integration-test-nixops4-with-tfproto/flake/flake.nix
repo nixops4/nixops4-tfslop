@@ -110,7 +110,11 @@
             members.sensitiveDeployment =
               { members, ... }:
               let
-                inherit (inputs.nixops4.lib.sensitive) mkSensitive isSensitive;
+                inherit (inputs.nixops4.lib.sensitive)
+                  mkSensitive
+                  isSensitive
+                  revealSensitiveValue
+                  ;
               in
               {
                 members.state = {
@@ -139,7 +143,24 @@
                     else
                       throw "REGRESSION: echo.outputs.computed_secret is not a sensitive marker";
                 };
+                # End-to-end redaction: second `fx_sensitive` whose
+                # input is the revealed value of the first echo's
+                # sensitive output. Ordering matters — apply topology
+                # runs `echo` first (registering "COMPUTED:hunter2"
+                # from the marker on its output), then `downstream`
+                # whose provider writes `secret=COMPUTED:hunter2` to
+                # its own stderr. That write inherits the runner's
+                # fd 2, hits the shovel, and gets redacted.
+                members.downstream = {
+                  type = providers.tfFixture.fx_sensitive;
+                  state = members.state;
+                  inputs.secret = mkSensitive { provenance = "test-downstream"; } (
+                    revealSensitiveValue members.echo.outputs.computed_secret
+                  );
+                  inputs.write_to = "downstream-echo-observed.txt";
+                };
               };
+
           };
       }
     );

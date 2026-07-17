@@ -142,10 +142,46 @@ runCommand "itest-nixops4-with-tfproto"
       #     a proper sensitive marker (via the throw-on-else memo
       #     whose successful evaluation persists a corroborating
       #     string).
-      nixops4 apply -v sensitiveDeployment --show-trace
+      # Capture stdout+stderr so the redaction assertions further
+      # below can inspect the log for the plaintext (should be
+      # absent) and the `<sensitive value from: ...>` shape (should
+      # be present). The fixture provider deliberately writes the
+      # received secret to its own stderr — that write inherits fd 2
+      # (the runner's shovel pipe) and gets redacted before reaching
+      # the terminal.
+      apply_log=$(mktemp "$TMPDIR/sensitive-apply.XXXXXX.log")
+      nixops4 apply -v sensitiveDeployment --show-trace \
+        > >(tee -a "$apply_log") 2> >(tee -a "$apply_log" >&2)
 
       test -f sensitive-echo-observed.txt
       test -f sensitive-state.json
+
+      # (0) End-to-end redaction. `downstream` reveals `echo`'s
+      # sensitive output (COMPUTED:hunter2) and re-wraps it as its
+      # own input. In verbose mode nixops4 emits a debug print of
+      # the resolved inputs via `eprintln!` from work.rs — a real
+      # accidental-leak vector for any operator running with `-v`.
+      # By the time `downstream` runs, `echo`'s Create response has
+      # been ingested, so the register knows COMPUTED:hunter2 and
+      # the fd-2 shovel redacts the eprintln! line before it hits
+      # the terminal.
+      # Assertions:
+      # - The debug print for `downstream`'s inputs does NOT contain
+      #   the plaintext COMPUTED:hunter2 verbatim (redaction fired).
+      # - The redaction marker `<sensitive value from: ...>` shows
+      #   up in the log — proof the register was consulted.
+      # Note: `echo`'s OWN Create is not covered by this assertion —
+      # its response is what populates the register, so any prior
+      # print of its inputs precedes registration and would leak.
+      # Input-side ingestion is a separate later slice.
+      if grep -q 'COMPUTED:hunter2' "$apply_log"; then
+        echo "FAIL: apply output contains the unredacted derived secret"
+        exit 1
+      fi
+      if ! grep -q '<sensitive value from:' "$apply_log"; then
+        echo "FAIL: apply output missing the expected redaction marker"
+        exit 1
+      fi
 
       # (1) File contents are plain.
       observed=$(cat sensitive-echo-observed.txt)
