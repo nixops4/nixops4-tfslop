@@ -22,6 +22,7 @@ use crate::schema::{Block, BlockType, NestingMode, ProviderSchema};
 pub fn build_prior_state_json(
     schema: &ProviderSchema,
     type_name: &str,
+    stored_state: Option<Value>,
     prev_inputs: Map<String, Value>,
     prev_outputs: Option<Map<String, Value>>,
 ) -> Result<Vec<u8>> {
@@ -30,15 +31,25 @@ pub fn build_prior_state_json(
         .get(type_name)
         .with_context(|| format!("no schema entry for resource type {}", type_name))?;
 
-    // Merge outputs on top of inputs. Where a provider reused an
-    // attribute name for a computed field, the later (output) value
-    // wins — same order the provider itself would have produced.
-    let mut prior = prev_inputs;
-    if let Some(outputs) = prev_outputs {
-        for (k, v) in outputs {
-            prior.insert(k, v);
+    // The complete state from the last Apply is what Terraform would
+    // hand back, and what providers expect (SDK defaults included).
+    // Reconstruct from inputs and outputs only when it is absent:
+    // state written by an adapter that did not keep it yet.
+    let mut prior = match stored_state {
+        Some(Value::Object(m)) => m,
+        _ => {
+            // Merge outputs on top of inputs. Where a provider reused an
+            // attribute name for a computed field, the later (output) value
+            // wins — same order the provider itself would have produced.
+            let mut prior = prev_inputs;
+            if let Some(outputs) = prev_outputs {
+                for (k, v) in outputs {
+                    prior.insert(k, v);
+                }
+            }
+            prior
         }
-    }
+    };
 
     strip_write_only_block(&resource.block, &mut prior);
 

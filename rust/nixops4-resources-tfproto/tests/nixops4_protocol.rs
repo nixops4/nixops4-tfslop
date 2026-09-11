@@ -386,9 +386,15 @@ async fn fx_private_round_trips_between_create_and_update() {
     // Prove the create outcome is what the fixture handed us, not some
     // fabricated placeholder: base64-decode and check the payload.
     // (The fixture writes `private-for-<token>`.)
-    let created_b64 = private_after_create
+    // The slot is an object: the provider's bytes under `provider`, the
+    // full new_state under `state` (see private_state.rs).
+    let created_b64 = private_after_create["provider"]
         .as_str()
-        .expect("private_state must round-trip as a JSON string");
+        .expect("private_state.provider must round-trip as a JSON string");
+    assert!(
+        private_after_create["state"].is_object(),
+        "private_state.state must carry the full new_state"
+    );
     let created_bytes = base64::engine::general_purpose::STANDARD
         .decode(created_b64)
         .expect("private_state must decode as base64");
@@ -422,7 +428,7 @@ async fn fx_private_round_trips_between_create_and_update() {
     let updated_b64 = update_outcome
         .private_state
         .as_ref()
-        .and_then(|v| v.as_str())
+        .and_then(|v| v["provider"].as_str().map(str::to_owned))
         .expect("update must surface a fresh private_state");
     let updated_bytes = base64::engine::general_purpose::STANDARD
         .decode(updated_b64)

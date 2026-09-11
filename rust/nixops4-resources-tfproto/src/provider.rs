@@ -20,6 +20,8 @@ use crate::tf_provider_client::ProviderClient;
 struct PriorState {
     inputs: Map<String, Value>,
     outputs: Option<Map<String, Value>>,
+    /// Complete state from the last Apply, when the adapter kept it.
+    state: Option<Value>,
 }
 
 /// Whole outcome of one Plan+Apply run: outputs projected onto the
@@ -28,6 +30,8 @@ struct PriorState {
 struct PlanApplyOutcome {
     outputs: v0::OutputProperties,
     apply_private: Vec<u8>,
+    /// The provider's complete `new_state`, kept for the next prior_state.
+    new_state: Value,
 }
 
 pub struct TfPluginProvider {
@@ -53,7 +57,11 @@ impl ResourceProvider for TfPluginProvider {
             .await?;
         Ok(v0::CreateResourceResponse {
             output_properties: outcome.outputs,
-            private_state: private_state::encode(outcome.apply_private).map(v0::PrivateState),
+            private_state: private_state::encode(private_state::Private {
+                provider: outcome.apply_private,
+                state: Some(outcome.new_state),
+            })
+            .map(v0::PrivateState),
         })
     }
 
@@ -63,17 +71,23 @@ impl ResourceProvider for TfPluginProvider {
     ) -> Result<v0::UpdateResourceResponse> {
         let type_name = request.resource.type_.0.clone();
         let new_inputs_json = properties_to_cty_json(request.input_properties.0)?;
-        let prior_private = private_state::decode(request.resource.private_state.map(|p| p.0))?;
+        let stored = private_state::decode(request.resource.private_state.map(|p| p.0))?;
+        let prior_private = stored.provider;
         let prior = PriorState {
             inputs: request.resource.input_properties.0,
             outputs: request.resource.output_properties.map(|op| op.0),
+            state: stored.state,
         };
         let outcome = self
             .plan_and_apply(&type_name, Some(prior), prior_private, new_inputs_json)
             .await?;
         Ok(v0::UpdateResourceResponse {
             output_properties: outcome.outputs,
-            private_state: private_state::encode(outcome.apply_private).map(v0::PrivateState),
+            private_state: private_state::encode(private_state::Private {
+                provider: outcome.apply_private,
+                state: Some(outcome.new_state),
+            })
+            .map(v0::PrivateState),
         })
     }
 
@@ -82,10 +96,12 @@ impl ResourceProvider for TfPluginProvider {
         request: v0::DestroyResourceRequest,
     ) -> Result<v0::DestroyResourceResponse> {
         let type_name = request.resource.type_.0.clone();
-        let prior_private = private_state::decode(request.resource.private_state.map(|p| p.0))?;
+        let stored = private_state::decode(request.resource.private_state.map(|p| p.0))?;
+        let prior_private = stored.provider;
         let prior = PriorState {
             inputs: request.resource.input_properties.0,
             outputs: request.resource.output_properties.map(|op| op.0),
+            state: stored.state,
         };
         // A tfplugin destroy is Plan + Apply with `proposed_new_state`
         // = `planned_state` = `config` = cty null. The provider echoes
@@ -135,11 +151,12 @@ async fn plan_and_apply_inner(
 
     // cty's msgpack decoder wants total objects; nixops4 gives us only
     // what the user set. See `complete.rs`.
+    let resource = schema
+        .resource_schemas
+        .get(type_name)
+        .with_context(|| format!("no schema entry for resource type {}", type_name))?;
+
     let inputs_json = {
-        let resource = schema
-            .resource_schemas
-            .get(type_name)
-            .with_context(|| format!("no schema entry for resource type {}", type_name))?;
         let value: Value = serde_json::from_slice(&inputs_json)
             .with_context(|| format!("parsing inputs for {} as JSON", type_name))?;
         let value = crate::complete::complete_block(&resource.block, value, type_name)?;
@@ -156,7 +173,7 @@ async fn plan_and_apply_inner(
 
     let prior_state_json = match prior {
         None => b"null".to_vec(),
-        Some(p) => build_prior_state_json(&schema, type_name, p.inputs, p.outputs)?,
+        Some(p) => build_prior_state_json(&schema, type_name, p.state, p.inputs, p.outputs)?,
     };
 
     // Deprecation warnings are cross-referenced against inputs so we
@@ -187,11 +204,26 @@ async fn plan_and_apply_inner(
             .await?;
     }
 
+    // Terraform merges prior state into the config before Plan; see
+    // `proposed.rs`. On create (prior null) this is the config itself.
+    let proposed_json = {
+        let prior_value: Value = serde_json::from_slice(&prior_state_json)
+            .context("parsing prior_state before proposing")?;
+        let config_value: Value =
+            serde_json::from_slice(&inputs_json).context("parsing config before proposing")?;
+        serde_json::to_vec(&crate::proposed::proposed_new(
+            &resource.block,
+            &prior_value,
+            &config_value,
+        ))
+        .context("serialising proposed_new_state")?
+    };
+
     let plan = client
         .plan_resource_change(
             type_name,
             prior_state_json.clone(),
-            inputs_json.clone(),
+            proposed_json,
             inputs_json.clone(),
             prior_private,
         )
@@ -211,11 +243,13 @@ async fn plan_and_apply_inner(
         .await?;
     let new_state = apply.new_state.context("provider returned no new_state")?;
 
-    let new_state_json = crate::dynamic_value::to_json_bytes(&new_state)
+    let new_state_value = crate::dynamic_value::to_json(&new_state)
         .context("decoding new_state from the provider")?;
+    let new_state_json = serde_json::to_vec(&new_state_value).context("serialising new_state")?;
     let outputs = project_new_state(&schema, type_name, &new_state_json)?;
     let outputs = wrap_sensitive_outputs(&schema, type_name, outputs)?;
     Ok(PlanApplyOutcome {
+        new_state: new_state_value,
         outputs: v0::OutputProperties(outputs),
         apply_private: apply.private,
     })
