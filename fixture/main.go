@@ -840,12 +840,12 @@ func (p *fixtureProvider) PlanResourceChange(_ context.Context, req *tfprotov6.P
 		}
 	}
 	// Assert that the adapter honours write_only on prior_state.
-	if req.TypeName == "fx_write_only" && priorStateHasField(req.PriorState, "secret") {
+	if req.TypeName == "fx_write_only" && priorStateHasValue(req.PriorState, "secret") {
 		return &tfprotov6.PlanResourceChangeResponse{
 			Diagnostics: []*tfprotov6.Diagnostic{{
 				Severity: tfprotov6.DiagnosticSeverityError,
 				Summary:  "prior_state.secret leaked",
-				Detail:   "write_only attribute must be stripped from prior_state by the adapter",
+				Detail:   "write_only attribute must be null in prior_state; the adapter must not feed a stored value back",
 			}},
 		}, nil
 	}
@@ -976,7 +976,11 @@ func parseDeferReason(s string) tfprotov6.DeferredReason {
 // priorStateHasField reports whether the (JSON) prior_state contains
 // the named top-level key. Used by fixture asserts against the
 // adapter's stripping of write_only attributes.
-func priorStateHasField(pns *tfprotov6.DynamicValue, key string) bool {
+// priorStateHasValue reports whether prior_state carries a non-null
+// value for key. A write-only attribute must arrive as null: cty's
+// msgpack form requires every attribute to be present, so absence is
+// not an option, and Terraform core sends null for them too.
+func priorStateHasValue(pns *tfprotov6.DynamicValue, key string) bool {
 	if pns == nil || len(pns.JSON) == 0 {
 		return false
 	}
@@ -984,8 +988,8 @@ func priorStateHasField(pns *tfprotov6.DynamicValue, key string) bool {
 	if err := json.Unmarshal(pns.JSON, &m); err != nil {
 		return false
 	}
-	_, ok := m[key]
-	return ok
+	v, ok := m[key]
+	return ok && v != nil
 }
 
 // planFxComputed injects a synthetic `id` into the planned state. On

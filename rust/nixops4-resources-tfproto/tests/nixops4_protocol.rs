@@ -218,7 +218,7 @@ async fn update_fx_write_only_strips_secret_from_prior_state() {
         Value::String("new-secret".to_string()),
     );
 
-    // A successful call proves the adapter stripped `secret` from
+    // A successful call proves the adapter nulled `secret` in
     // prior_state before sending it to the provider. A failure here
     // means the guard regressed.
     let _ = client
