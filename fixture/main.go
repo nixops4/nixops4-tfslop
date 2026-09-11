@@ -782,6 +782,19 @@ func (p *fixtureProvider) ValidateResourceConfig(_ context.Context, req *tfproto
 			}, nil
 		}
 	}
+	// A null config has no required attributes in it. terraform-plugin-sdk
+	// v2 rejects that ("Missing required argument"), so a client that
+	// validates on destroy fails every destroy against such a provider.
+	// Mirror the behaviour so the adapter's destroy path is covered.
+	if req.Config != nil && string(req.Config.JSON) == "null" {
+		return &tfprotov6.ValidateResourceConfigResponse{
+			Diagnostics: []*tfprotov6.Diagnostic{{
+				Severity: tfprotov6.DiagnosticSeverityError,
+				Summary:  "Missing required argument",
+				Detail:   "validate was called with a null config; a destroy must not validate",
+			}},
+		}, nil
+	}
 	if req.TypeName == "fx_validate_always_rejects" {
 		return &tfprotov6.ValidateResourceConfigResponse{
 			Diagnostics: []*tfprotov6.Diagnostic{{

@@ -176,9 +176,16 @@ async fn plan_and_apply_inner(
     // provider's message is most specific to the user's config — Plan
     // would either error later with a less-specific message, or (worse)
     // silently substitute defaults for the bad input.
-    client
-        .validate_resource_config(type_name, inputs_json.clone())
-        .await?;
+    //
+    // Not on destroy: the config is null then, and a provider checks
+    // required attributes against it (terraform-plugin-sdk v2 does),
+    // which would refuse every destroy. Terraform core skips
+    // validation on destroy as well.
+    if inputs_json != b"null" {
+        client
+            .validate_resource_config(type_name, inputs_json.clone())
+            .await?;
+    }
 
     let plan = client
         .plan_resource_change(
