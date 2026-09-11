@@ -88,6 +88,17 @@ impl ProviderClient {
             // just guarantees no orphan when they don't.
             .kill_on_drop(true);
 
+        // The provider SDK's logger (terraform-plugin-go, "sdk.*"
+        // modules) reads its level from TF_LOG_SDK and falls back to
+        // trace when that is unset, which is the CLI's job to set.
+        // We are the CLI here: default to errors only, and leave the
+        // variable alone when the user set it to debug a provider.
+        // Tested against the Scaleway provider: unset gave ~630 trace
+        // lines per schema fetch, ERROR gives one go-plugin line.
+        if std::env::var_os("TF_LOG_SDK").is_none() {
+            cmd.env("TF_LOG_SDK", "ERROR");
+        }
+
         let mut process = cmd
             .spawn()
             .with_context(|| format!("spawning provider {}", provider_path))?;
