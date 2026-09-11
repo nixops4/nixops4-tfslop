@@ -32,11 +32,11 @@ tokio = { version = "1.45", features = ["io-util", "macros", "net", "process", "
 
 [dev-dependencies.nixops4-resource-runner]
 git = "https://scratch.notatio.nl/botbot/nixops4.git"
-rev = "d9ffb564c59695f941d971e21bab21163457a05a"
+branch = "for-tfproto"
 
 [dependencies.nixops4-resource]
 git = "https://scratch.notatio.nl/botbot/nixops4.git"
-rev = "d9ffb564c59695f941d971e21bab21163457a05a"
+branch = "for-tfproto"
 
 [build-dependencies]
 tonic-prost-build = "0.14"

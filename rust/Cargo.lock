@@ -709,7 +709,7 @@ dependencies = [
 [[package]]
 name = "nixops4-resource"
 version = "0.1.0"
-source = "git+https://scratch.notatio.nl/botbot/nixops4.git?rev=d9ffb564c59695f941d971e21bab21163457a05a#d9ffb564c59695f941d971e21bab21163457a05a"
+source = "git+https://scratch.notatio.nl/botbot/nixops4.git?branch=for-tfproto#aaf1af45b10688dd6e02afdc41b6a7b87182f47f"
 dependencies = [
  "anyhow",
  "chrono",
@@ -726,7 +726,7 @@ dependencies = [
 [[package]]
 name = "nixops4-resource-runner"
 version = "0.1.0"
-source = "git+https://scratch.notatio.nl/botbot/nixops4.git?rev=d9ffb564c59695f941d971e21bab21163457a05a#d9ffb564c59695f941d971e21bab21163457a05a"
+source = "git+https://scratch.notatio.nl/botbot/nixops4.git?branch=for-tfproto#aaf1af45b10688dd6e02afdc41b6a7b87182f47f"
 dependencies = [
  "anyhow",
  "clap",
@@ -740,6 +740,7 @@ dependencies = [
  "serde_json",
  "tokio",
  "tracing",
+ "zeroizing-alloc",
 ]
 
 [[package]]
