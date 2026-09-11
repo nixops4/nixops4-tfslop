@@ -133,6 +133,27 @@ async fn plan_and_apply_inner(
     let raw_schema = client.get_provider_schema().await?;
     let schema = ProviderSchema::from_proto(raw_schema)?;
 
+    // cty's msgpack decoder wants total objects; nixops4 gives us only
+    // what the user set. See `complete.rs`.
+    let inputs_json = {
+        let resource = schema
+            .resource_schemas
+            .get(type_name)
+            .with_context(|| format!("no schema entry for resource type {}", type_name))?;
+        let value: Value = serde_json::from_slice(&inputs_json)
+            .with_context(|| format!("parsing inputs for {} as JSON", type_name))?;
+        let value = crate::complete::complete_block(&resource.block, value, type_name)?;
+        serde_json::to_vec(&value).context("serialising completed inputs")?
+    };
+    let provider_config = {
+        let value = crate::complete::complete_block(
+            &schema.provider.block,
+            Value::Object(Map::new()),
+            "provider",
+        )?;
+        serde_json::to_vec(&value).context("serialising provider configuration")?
+    };
+
     let prior_state_json = match prior {
         None => b"null".to_vec(),
         Some(p) => build_prior_state_json(&schema, type_name, p.inputs, p.outputs)?,
@@ -148,7 +169,7 @@ async fn plan_and_apply_inner(
         }
     }
 
-    client.configure_provider(b"{}".to_vec()).await?;
+    client.configure_provider(provider_config).await?;
 
     // Validate the resource config before Plan. Surfaces schema-shape
     // and provider-invariant errors at the earliest layer, where the

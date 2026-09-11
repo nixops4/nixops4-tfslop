@@ -42,8 +42,12 @@ pub fn build_prior_state_json(
 
     strip_write_only_block(&resource.block, &mut prior);
 
-    serde_json::to_vec(&Value::Object(prior))
-        .with_context(|| format!("serialising prior_state for {}", type_name))
+    // Stored inputs and outputs together may still miss attributes
+    // (write-only ones just stripped, computed ones the provider left
+    // null and nixops4 did not store); cty msgpack wants them all.
+    let prior = crate::complete::complete_block(&resource.block, Value::Object(prior), type_name)?;
+
+    serde_json::to_vec(&prior).with_context(|| format!("serialising prior_state for {}", type_name))
 }
 
 fn strip_write_only_block(block: &Block, state: &mut Map<String, Value>) {

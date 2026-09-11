@@ -20,20 +20,22 @@ use std::collections::BTreeMap;
 use crate::tfplugin6;
 
 /// Provider schema in a stable JSON shape.
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Serialize)]
 pub struct ProviderSchema {
+    /// The provider's own configuration block (`ConfigureProvider`).
+    pub provider: ResourceSchema,
     /// Managed resource types, keyed by type name.
     pub resource_schemas: BTreeMap<String, ResourceSchema>,
     /// Data source types, keyed by type name.
     pub data_source_schemas: BTreeMap<String, ResourceSchema>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Serialize)]
 pub struct ResourceSchema {
     pub block: Block,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Serialize)]
 pub struct Block {
     pub attributes: BTreeMap<String, Attribute>,
     /// Legacy-style nested blocks (as opposed to cty nested attributes).
@@ -47,7 +49,7 @@ pub struct Block {
     pub deprecated: bool,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Serialize)]
 pub struct BlockType {
     pub nesting: NestingMode,
     /// `min_items = 0` marks a block whose presence is optional.
@@ -71,7 +73,7 @@ fn is_zero_i64(n: &i64) -> bool {
 /// How multiple instances of a block relate in the config. `Single`
 /// and `List` are the common ones; the others are supported by
 /// tfplugin but not by this adapter yet.
-#[derive(Debug, Serialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub enum NestingMode {
     Single,
     List,
@@ -87,7 +89,7 @@ pub enum NestingMode {
     Unsupported(String),
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Serialize)]
 pub struct Attribute {
     /// go-cty JSON encoding of the attribute type, forwarded verbatim
     /// from the tfplugin `Attribute.type` bytes.
@@ -130,6 +132,12 @@ pub type CtyType = String;
 impl ProviderSchema {
     pub fn from_proto(resp: tfplugin6::get_provider_schema::Response) -> Result<Self> {
         Ok(ProviderSchema {
+            provider: ResourceSchema {
+                block: match resp.provider.and_then(|s| s.block) {
+                    Some(b) => Block::from_proto("provider", b)?,
+                    None => Block::empty(),
+                },
+            },
             resource_schemas: resp
                 .resource_schemas
                 .into_iter()
@@ -159,7 +167,7 @@ impl ResourceSchema {
 }
 
 impl Block {
-    fn empty() -> Self {
+    pub fn empty() -> Self {
         Block {
             attributes: BTreeMap::new(),
             block_types: BTreeMap::new(),

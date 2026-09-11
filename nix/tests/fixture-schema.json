@@ -1,4 +1,9 @@
 {
+  "provider": {
+    "block": {
+      "attributes": {}
+    }
+  },
   "resource_schemas": {
     "fx_bool": {
       "block": {

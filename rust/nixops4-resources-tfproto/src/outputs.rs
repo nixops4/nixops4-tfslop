@@ -187,6 +187,9 @@ mod tests {
         let mut rs = BTreeMap::new();
         rs.insert(type_name.to_string(), ResourceSchema { block });
         ProviderSchema {
+            provider: crate::schema::ResourceSchema {
+                block: crate::schema::Block::empty(),
+            },
             resource_schemas: rs,
             data_source_schemas: BTreeMap::new(),
         }

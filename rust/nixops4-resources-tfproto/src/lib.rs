@@ -8,6 +8,7 @@ pub mod tfplugin6 {
     tonic::include_proto!("tfplugin6");
 }
 
+pub mod complete;
 pub mod deprecation;
 pub mod dynamic_value;
 pub mod outputs;
