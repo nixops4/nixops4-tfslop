@@ -973,9 +973,6 @@ func parseDeferReason(s string) tfprotov6.DeferredReason {
 	return tfprotov6.DeferredReasonUnknown
 }
 
-// priorStateHasField reports whether the (JSON) prior_state contains
-// the named top-level key. Used by fixture asserts against the
-// adapter's stripping of write_only attributes.
 // priorStateHasValue reports whether prior_state carries a non-null
 // value for key. A write-only attribute must arrive as null: cty's
 // msgpack form requires every attribute to be present, so absence is
