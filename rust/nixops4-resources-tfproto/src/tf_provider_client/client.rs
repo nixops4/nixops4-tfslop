@@ -286,7 +286,7 @@ impl ProviderClient {
     ) -> Result<()> {
         let req = tfplugin6::validate_resource_config::Request {
             type_name: type_name.to_string(),
-            config: Some(dv(config_json)),
+            config: Some(dv(config_json)?),
             client_capabilities: Some(announced_client_capabilities()),
         };
         let response = self
@@ -322,10 +322,7 @@ impl ProviderClient {
     pub async fn configure_provider(&self, config_json: Vec<u8>) -> Result<()> {
         let req = tfplugin6::configure_provider::Request {
             terraform_version: "0.0.0-nixops4-tfproto".to_string(),
-            config: Some(tfplugin6::DynamicValue {
-                msgpack: Vec::new(),
-                json: config_json,
-            }),
+            config: Some(dv(config_json)?),
             client_capabilities: Some(announced_client_capabilities()),
         };
         let response = self
@@ -354,9 +351,9 @@ impl ProviderClient {
     ) -> Result<tfplugin6::plan_resource_change::Response> {
         let req = tfplugin6::plan_resource_change::Request {
             type_name: type_name.to_string(),
-            prior_state: Some(dv(prior_state_json)),
-            proposed_new_state: Some(dv(proposed_new_state_json)),
-            config: Some(dv(config_json)),
+            prior_state: Some(dv(prior_state_json)?),
+            proposed_new_state: Some(dv(proposed_new_state_json)?),
+            config: Some(dv(config_json)?),
             prior_private,
             provider_meta: None,
             client_capabilities: Some(announced_client_capabilities()),
@@ -386,9 +383,9 @@ impl ProviderClient {
     ) -> Result<tfplugin6::apply_resource_change::Response> {
         let req = tfplugin6::apply_resource_change::Request {
             type_name: type_name.to_string(),
-            prior_state: Some(dv(prior_state_json)),
+            prior_state: Some(dv(prior_state_json)?),
             planned_state: Some(planned_state),
-            config: Some(dv(config_json)),
+            config: Some(dv(config_json)?),
             planned_private,
             provider_meta: None,
             planned_identity: None,
@@ -408,12 +405,10 @@ impl ProviderClient {
     }
 }
 
-/// Build a JSON-encoded `DynamicValue` from raw go-cty JSON bytes.
-fn dv(json: Vec<u8>) -> tfplugin6::DynamicValue {
-    tfplugin6::DynamicValue {
-        msgpack: Vec::new(),
-        json,
-    }
+/// Build a `DynamicValue` from raw go-cty JSON bytes. See
+/// [`crate::dynamic_value`] for why both encodings are sent.
+fn dv(json: Vec<u8>) -> Result<tfplugin6::DynamicValue> {
+    crate::dynamic_value::from_json(json)
 }
 
 /// Bail when the provider signalled `requires_replace` on a Plan.

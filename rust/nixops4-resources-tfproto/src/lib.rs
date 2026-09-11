@@ -9,6 +9,7 @@ pub mod tfplugin6 {
 }
 
 pub mod deprecation;
+pub mod dynamic_value;
 pub mod outputs;
 pub mod prior_state;
 pub mod private_state;

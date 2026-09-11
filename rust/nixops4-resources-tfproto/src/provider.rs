@@ -148,10 +148,7 @@ async fn plan_and_apply_inner(
         }
     }
 
-    // The fixture takes no configuration. Real providers configured
-    // through the resource `tf-provider-*` prefix mechanism land later
-    // in the series.
-    client.configure_provider(b"null".to_vec()).await?;
+    client.configure_provider(b"{}".to_vec()).await?;
 
     // Validate the resource config before Plan. Surfaces schema-shape
     // and provider-invariant errors at the earliest layer, where the
@@ -186,7 +183,9 @@ async fn plan_and_apply_inner(
         .await?;
     let new_state = apply.new_state.context("provider returned no new_state")?;
 
-    let outputs = project_new_state(&schema, type_name, &new_state.json)?;
+    let new_state_json = crate::dynamic_value::to_json_bytes(&new_state)
+        .context("decoding new_state from the provider")?;
+    let outputs = project_new_state(&schema, type_name, &new_state_json)?;
     let outputs = wrap_sensitive_outputs(&schema, type_name, outputs)?;
     Ok(PlanApplyOutcome {
         outputs: v0::OutputProperties(outputs),
