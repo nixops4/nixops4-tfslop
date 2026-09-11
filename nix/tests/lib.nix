@@ -225,6 +225,12 @@ let
     (lib.evalModules {
       modules = [ cfg.resourceTypes.fx_computed_block_attr.outputs ];
     }).options;
+  # `value` omitted on purpose: an optional attribute must evaluate
+  # without a definition, to null.
+  materialisedComputedOmitted =
+    (lib.evalModules {
+      modules = [ cfg.resourceTypes.fx_computed.inputs ];
+    }).config;
   fxComputedOutputOptions =
     (lib.evalModules {
       modules = [ cfg.resourceTypes.fx_computed.outputs ];
@@ -586,6 +592,28 @@ in
     };
   };
 
+  # Optional attributes: nullable, default null, so a user can omit
+  # them the way Terraform users do.
+
+  "test optional attribute is nullOr" = {
+    expr = fxComputedInputOptions.value.type.name;
+    expected = "nullOr";
+  };
+
+  "test optional attribute wraps the declared type" = {
+    expr = fxComputedInputOptions.value.type.nestedTypes.elemType.name;
+    expected = "str";
+  };
+
+  "test optional attribute defaults to null" = {
+    expr = materialisedComputedOmitted.value;
+    expected = null;
+  };
+
+  "test required attribute has no default" = {
+    expr = fxStringInputOptions.value ? default;
+    expected = false;
+  };
   # Optional attributes inside a block must survive the
   # required-or-optional filter.
 
@@ -595,10 +623,10 @@ in
     expected = true;
   };
 
-  "test optional inner attribute is str" = {
+  "test optional inner attribute is nullOr str" = {
     expr =
       (fxOptionalBlockAttrInputOptions.settings.type.nestedTypes.elemType.getSubOptions [ ])
-      .endpoint.type.name;
+      .endpoint.type.nestedTypes.elemType.name;
     expected = "str";
   };
 

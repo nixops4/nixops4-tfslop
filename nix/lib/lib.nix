@@ -144,19 +144,35 @@ let
     else
       { };
 
+  # Optional attributes (`optional = true`, whether or not also
+  # `computed`) may be left out by the user, which is how Terraform
+  # users leave a value to the provider. A missing option would make
+  # nixops4 fail on access, so the option is nullable with a null
+  # default; cty null is exactly what Terraform sends for an omitted
+  # attribute, so no further translation is needed downstream.
   convertInputAttributes =
     attrs:
     lib.mapAttrs (
       name: attr:
       let
         parsed = builtins.fromJSON attr.type;
+        base = applySensitiveFlag (attr.sensitive or false) (ctyParsedToOptionType parsed);
+        required = attr.required or false;
+        # `apply` (set dedup, tuple length check) must let the null
+        # of an omitted optional attribute through untouched.
+        applyAttrs =
+          let
+            a = ctyApplyForType name parsed;
+          in
+          if required || !(a ? apply) then a else { apply = v: if v == null then null else a.apply v; };
       in
       mkOption (
         {
-          type = applySensitiveFlag (attr.sensitive or false) (ctyParsedToOptionType parsed);
+          type = if required then base else types.nullOr base;
           description = if attr.description or "" != "" then attr.description else "Terraform input";
         }
-        // ctyApplyForType name parsed
+        // lib.optionalAttrs (!required) { default = null; }
+        // applyAttrs
       )
     ) (lib.filterAttrs (_: attr: attr.required or false || attr.optional or false) attrs);
 
