@@ -164,14 +164,15 @@ async fn plan_requires_replace_surfaces_paths() {
         .await
         .expect("configure fixture");
 
-    // Even a first Plan on this resource returns requires_replace,
-    // because the fixture Plan always sets it — enough to exercise
-    // the adapter's guard without needing a prior state.
+    // The fixture Plan always sets requires_replace. With a prior
+    // state present that is a real "cannot update in place" signal,
+    // which the adapter must refuse.
+    let prior = br#"{"value":"before"}"#.to_vec();
     let inputs = br#"{"value":"anything"}"#.to_vec();
     let result = client
         .plan_resource_change(
             "fx_needs_replace",
-            b"null".to_vec(),
+            prior,
             inputs.clone(),
             inputs,
             Vec::new(),
@@ -544,4 +545,45 @@ async fn destroy_string_via_plan_apply() {
     client.shutdown().await.expect("clean shutdown");
 
     assert_eq!(new_state.json, b"null");
+}
+
+// A create has no prior object, so a provider that marks its ForceNew
+// attributes as requires_replace (terraform-plugin-sdk v2 always does,
+// null differs from any value) must not be refused: the resource is
+// being created, not replaced. Terraform core ignores the list in
+// that case too.
+#[tokio::test]
+async fn plan_requires_replace_is_ignored_on_create() {
+    let Some(path) = fixture_path() else {
+        eprintln!("skipping: NIXOPS4_TFPROTO_FIXTURE not set");
+        return;
+    };
+    let client = ProviderClient::launch(&path).await.expect("launch fixture");
+    client
+        .configure_provider(b"null".to_vec())
+        .await
+        .expect("configure fixture");
+
+    let inputs = br#"{"value":"anything"}"#.to_vec();
+    let result = client
+        .plan_resource_change(
+            "fx_needs_replace",
+            b"null".to_vec(),
+            inputs.clone(),
+            inputs,
+            Vec::new(),
+        )
+        .await;
+    let _ = client.shutdown().await;
+
+    let response = result.expect("a create must not be refused for requires_replace");
+    assert_eq!(
+        response
+            .requires_replace
+            .iter()
+            .filter_map(|p| p.steps.first())
+            .count(),
+        1,
+        "the fixture still reports the path; the adapter just does not act on it"
+    );
 }

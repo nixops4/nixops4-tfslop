@@ -349,6 +349,11 @@ impl ProviderClient {
         config_json: Vec<u8>,
         prior_private: Vec<u8>,
     ) -> Result<tfplugin6::plan_resource_change::Response> {
+        // On a create the provider compares null against the config, so
+        // every ForceNew attribute shows up in `requires_replace`
+        // (terraform-plugin-sdk v2 does exactly that). Terraform core
+        // ignores the list when there is no prior object; so do we.
+        let is_create = prior_state_json == b"null";
         let req = tfplugin6::plan_resource_change::Request {
             type_name: type_name.to_string(),
             prior_state: Some(dv(prior_state_json)?),
@@ -368,7 +373,9 @@ impl ProviderClient {
             .await?;
         check_diagnostics(&response.diagnostics)?;
         check_deferred(response.deferred.as_ref(), "PlanResourceChange")?;
-        check_requires_replace(&response.requires_replace)?;
+        if !is_create {
+            check_requires_replace(&response.requires_replace)?;
+        }
         Ok(response)
     }
 
