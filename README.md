@@ -84,3 +84,27 @@ nix flake check
 - Vendored `tfplugin*.proto` files: MPL-2.0, from
   [hashicorp/terraform](https://github.com/hashicorp/terraform) — see
   [NOTICE](NOTICE) for provenance.
+
+## Provider configuration
+
+Every generated resource type takes `inputs.provider`, typed from the
+provider's own configuration block (credentials, region, zone, ...).
+The adapter takes it out of the inputs before Plan and hands it to
+`ConfigureProvider`; a resource is destroyed with the configuration it
+was created with. The name is safe because Terraform reserves
+`provider` as a meta-argument on every resource, so no schema can have
+an attribute called that.
+
+```nix
+members.key = {
+  type = providers.scaleway.scaleway_iam_ssh_key;
+  inputs.provider = { zone = "nl-ams-1"; secret_key = mkSensitive { … } "…"; };
+  inputs.name = "deployer";
+  inputs.public_key = "ssh-ed25519 …";
+};
+```
+
+Attributes left unset fall back to whatever the provider reads on its
+own, typically environment variables. There is deliberately no
+provider-wide default: configuration is data on the resource, and
+sharing it between resources is the expression's job.

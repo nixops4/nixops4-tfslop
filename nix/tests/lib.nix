@@ -592,6 +592,46 @@ in
     };
   };
 
+  # Provider configuration: every resource type takes `inputs.provider`,
+  # typed from the provider block, optional as a whole.
+
+  "test every resource type has an inputs.provider option" = {
+    expr = lib.all (rt: (lib.evalModules { modules = [ rt.inputs ]; }).options ? provider) (
+      lib.attrValues cfg.resourceTypes
+    );
+    expected = true;
+  };
+
+  "test inputs.provider defaults to an empty configuration" = {
+    expr = (lib.evalModules { modules = [ cfg.resourceTypes.fx_string.inputs ]; }).config.provider;
+    expected = {
+      tag = null;
+    };
+  };
+
+  "test inputs.provider is typed from the provider block" = {
+    expr =
+      (lib.evalModules {
+        modules = [
+          cfg.resourceTypes.fx_string.inputs
+          { provider.tag = "configured"; }
+        ];
+      }).config.provider.tag;
+    expected = "configured";
+  };
+
+  "test inputs.provider rejects attributes the provider block lacks" = {
+    expr =
+      (builtins.tryEval (
+        (lib.evalModules {
+          modules = [
+            cfg.resourceTypes.fx_string.inputs
+            { provider.region = "nl-ams"; }
+          ];
+        }).config.provider
+      )).success;
+    expected = false;
+  };
   # Optional attributes: nullable, default null, so a user can omit
   # them the way Terraform users do.
 

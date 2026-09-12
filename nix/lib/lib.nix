@@ -343,7 +343,28 @@ rec {
           else
             "Terraform resource ${typeName}";
         inputs = {
-          options = convertBlockInputs value.block;
+          options = convertBlockInputs value.block // {
+            # Provider configuration rides in the inputs under `provider`,
+            # a name Terraform reserves as a meta-argument on every
+            # resource, so it can never collide with a schema attribute.
+            # The adapter takes it out before Plan and hands it to
+            # ConfigureProvider. Typed from the provider's own block, so
+            # sensitive-declared settings (credentials) demand a marker.
+            # Destroy reuses the configuration stored with the resource.
+            provider = mkOption {
+              type = types.submodule {
+                options = convertBlockInputs schema.provider.block;
+              };
+              default = { };
+              description = ''
+                Configuration for the Terraform provider process that
+                manages this resource, such as credentials, region or
+                zone. Attributes left unset fall back to whatever the
+                provider reads on its own (environment variables, config
+                files).
+              '';
+            };
+          };
         };
         outputs = {
           options = convertBlockOutputs value.block;

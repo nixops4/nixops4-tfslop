@@ -1,7 +1,15 @@
 {
   "provider": {
     "block": {
-      "attributes": {}
+      "attributes": {
+        "tag": {
+          "type": "\"string\"",
+          "required": false,
+          "optional": true,
+          "computed": false,
+          "description": "Provider-level configuration; echoed by fx_provider_echo."
+        }
+      }
     }
   },
   "resource_schemas": {
@@ -373,6 +381,19 @@
             "optional": false,
             "computed": false,
             "description": "Value the fixture writes into planned_private (as `private-for-<token>`)."
+          }
+        }
+      }
+    },
+    "fx_provider_echo": {
+      "block": {
+        "attributes": {
+          "value": {
+            "type": "\"string\"",
+            "required": false,
+            "optional": false,
+            "computed": true,
+            "description": "The provider configuration tag, as configured."
           }
         }
       }

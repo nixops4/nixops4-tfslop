@@ -107,6 +107,30 @@
             # (based on the schema flag) before returning to
             # nixops4. Downstream Nix then sees a proper eval-time
             # marker.
+
+            # Provider configuration through `inputs.provider`. The
+            # fixture's ConfigureProvider records `tag`, and
+            # fx_provider_echo's computed `value` is that tag; the memo
+            # persists it so the check can find it in the state.
+            members.providerDeployment =
+              { members, ... }:
+              {
+                members.state = {
+                  type = providers.local.state_file;
+                  inputs.name = "provider-state.json";
+                };
+                members.echo = {
+                  type = providers.tfFixture.fx_provider_echo;
+                  state = members.state;
+                  inputs.provider.tag = "configured-from-nix";
+                };
+                members.witness = {
+                  type = providers.local.memo;
+                  state = members.state;
+                  inputs.initialize_with = members.echo.outputs.value;
+                };
+              };
+
             members.sensitiveDeployment =
               { members, ... }:
               let

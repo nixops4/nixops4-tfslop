@@ -117,6 +117,31 @@ runCommand "itest-nixops4-with-tfproto"
       rm -f basic-state.json
     )
 
+    h1 PROVIDER CONFIGURATION
+    (
+      set -x
+      nixops4 apply -v providerDeployment --show-trace
+
+      test -f provider-state.json
+
+      # `inputs.provider.tag` must reach ConfigureProvider and come
+      # back as fx_provider_echo's computed `value`, which the witness
+      # memo persisted. The fixture has no `provider` attribute on the
+      # resource, so had the adapter left it in the config, Plan would
+      # have failed instead.
+      jq -es '
+        [.[] | .patch[]?
+               | .value? | .. | objects
+               | select(.initialize_with? == "configured-from-nix")]
+          | length > 0
+      ' provider-state.json | grep -q true || {
+        echo "FAIL: inputs.provider did not reach ConfigureProvider"
+        cat provider-state.json
+        exit 1
+      }
+
+      rm -f provider-state.json
+    )
     h1 SENSITIVE ROUND-TRIP
     (
       set -x
