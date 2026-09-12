@@ -28,7 +28,11 @@ func main() {
 	}
 }
 
-type fixtureProvider struct{}
+type fixtureProvider struct {
+	// Set by ConfigureProvider from the provider block's `tag`; echoed by
+	// fx_provider_echo so a test can prove configuration reached us.
+	configuredTag string
+}
 
 func notImplemented(op string) *tfprotov6.Diagnostic {
 	return &tfprotov6.Diagnostic{
@@ -47,7 +51,37 @@ func (p *fixtureProvider) GetMetadata(context.Context, *tfprotov6.GetMetadataReq
 
 func (p *fixtureProvider) GetProviderSchema(context.Context, *tfprotov6.GetProviderSchemaRequest) (*tfprotov6.GetProviderSchemaResponse, error) {
 	return &tfprotov6.GetProviderSchemaResponse{
+		Provider: &tfprotov6.Schema{
+			Version: 0,
+			Block: &tfprotov6.SchemaBlock{
+				Attributes: []*tfprotov6.SchemaAttribute{
+					{
+						Name:            "tag",
+						Type:            tftypes.String,
+						Optional:        true,
+						Description:     "Provider-level configuration; echoed by fx_provider_echo.",
+						DescriptionKind: tfprotov6.StringKindPlain,
+					},
+				},
+			},
+		},
 		ResourceSchemas: map[string]*tfprotov6.Schema{
+			// fx_provider_echo: `value` is computed from the provider
+			// configuration (`tag`) received in ConfigureProvider.
+			"fx_provider_echo": {
+				Version: 0,
+				Block: &tfprotov6.SchemaBlock{
+					Attributes: []*tfprotov6.SchemaAttribute{
+						{
+							Name:            "value",
+							Type:            tftypes.String,
+							Computed:        true,
+							Description:     "The provider configuration tag, as configured.",
+							DescriptionKind: tfprotov6.StringKindPlain,
+						},
+					},
+				},
+			},
 			"fx_string": {
 				Version: 0,
 				Block: &tfprotov6.SchemaBlock{
@@ -704,10 +738,24 @@ func (p *fixtureProvider) ValidateProviderConfig(context.Context, *tfprotov6.Val
 	}, nil
 }
 
-// ConfigureProvider is a no-op: the fixture takes no provider-level
-// configuration. It must succeed so real clients can proceed to
+// ConfigureProvider records the provider block's `tag` for
+// fx_provider_echo. It must succeed so real clients can proceed to
 // per-resource RPCs.
-func (p *fixtureProvider) ConfigureProvider(context.Context, *tfprotov6.ConfigureProviderRequest) (*tfprotov6.ConfigureProviderResponse, error) {
+func (p *fixtureProvider) ConfigureProvider(_ context.Context, req *tfprotov6.ConfigureProviderRequest) (*tfprotov6.ConfigureProviderResponse, error) {
+	p.configuredTag = ""
+	if req.Config != nil && len(req.Config.JSON) > 0 {
+		var m map[string]any
+		if err := json.Unmarshal(req.Config.JSON, &m); err != nil {
+			return &tfprotov6.ConfigureProviderResponse{Diagnostics: []*tfprotov6.Diagnostic{{
+				Severity: tfprotov6.DiagnosticSeverityError,
+				Summary:  "ConfigureProvider: config is not a JSON object",
+				Detail:   err.Error(),
+			}}}, nil
+		}
+		if tag, ok := m["tag"].(string); ok {
+			p.configuredTag = tag
+		}
+	}
 	return &tfprotov6.ConfigureProviderResponse{}, nil
 }
 
@@ -872,6 +920,18 @@ func (p *fixtureProvider) PlanResourceChange(_ context.Context, req *tfprotov6.P
 				Diagnostics: []*tfprotov6.Diagnostic{{
 					Severity: tfprotov6.DiagnosticSeverityError,
 					Summary:  "planFxComputed",
+					Detail:   err.Error(),
+				}},
+			}, nil
+		}
+		planned = enriched
+	case "fx_provider_echo":
+		enriched, err := planFxProviderEcho(req.ProposedNewState, p.configuredTag)
+		if err != nil {
+			return &tfprotov6.PlanResourceChangeResponse{
+				Diagnostics: []*tfprotov6.Diagnostic{{
+					Severity: tfprotov6.DiagnosticSeverityError,
+					Summary:  "planFxProviderEcho",
 					Detail:   err.Error(),
 				}},
 			}, nil
@@ -1079,6 +1139,27 @@ func applyFxSensitive(planned *tfprotov6.DynamicValue) error {
 // state and fills in the computed `value` attribute with what the
 // provider process itself sees for that variable at Plan time.
 // A missing env var maps to an empty string.
+// planFxProviderEcho fills the computed `value` with the tag received in
+// ConfigureProvider. Null proposed state (destroy) passes through.
+func planFxProviderEcho(pns *tfprotov6.DynamicValue, tag string) (*tfprotov6.DynamicValue, error) {
+	if pns == nil || len(pns.JSON) == 0 {
+		return pns, nil
+	}
+	var m map[string]any
+	if err := json.Unmarshal(pns.JSON, &m); err != nil {
+		return nil, err
+	}
+	if m == nil {
+		return pns, nil
+	}
+	m["value"] = tag
+	out, err := json.Marshal(m)
+	if err != nil {
+		return nil, err
+	}
+	return &tfprotov6.DynamicValue{JSON: out}, nil
+}
+
 func planFxEnvEcho(pns *tfprotov6.DynamicValue) (*tfprotov6.DynamicValue, error) {
 	if pns == nil || len(pns.JSON) == 0 {
 		return pns, nil

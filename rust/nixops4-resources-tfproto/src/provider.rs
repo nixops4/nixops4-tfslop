@@ -51,9 +51,10 @@ impl ResourceProvider for TfPluginProvider {
         request: v0::CreateResourceRequest,
     ) -> Result<v0::CreateResourceResponse> {
         let type_name = request.type_.0.clone();
-        let inputs_json = properties_to_cty_json(request.input_properties.0)?;
+        let (inputs, provider_config) = crate::provider_config::split(request.input_properties.0)?;
+        let inputs_json = properties_to_cty_json(inputs)?;
         let outcome = self
-            .plan_and_apply(&type_name, None, Vec::new(), inputs_json)
+            .plan_and_apply(&type_name, None, Vec::new(), inputs_json, provider_config)
             .await?;
         Ok(v0::CreateResourceResponse {
             output_properties: outcome.outputs,
@@ -70,16 +71,28 @@ impl ResourceProvider for TfPluginProvider {
         request: v0::UpdateResourceRequest,
     ) -> Result<v0::UpdateResourceResponse> {
         let type_name = request.resource.type_.0.clone();
-        let new_inputs_json = properties_to_cty_json(request.input_properties.0)?;
+        let (new_inputs, provider_config) =
+            crate::provider_config::split(request.input_properties.0)?;
+        let new_inputs_json = properties_to_cty_json(new_inputs)?;
         let stored = private_state::decode(request.resource.private_state.map(|p| p.0))?;
         let prior_private = stored.provider;
+        // The stored inputs carry the provider configuration the resource
+        // was created with; destroy reuses it, update uses the new one.
+        let (prior_inputs, _prior_provider_config) =
+            crate::provider_config::split(request.resource.input_properties.0)?;
         let prior = PriorState {
-            inputs: request.resource.input_properties.0,
+            inputs: prior_inputs,
             outputs: request.resource.output_properties.map(|op| op.0),
             state: stored.state,
         };
         let outcome = self
-            .plan_and_apply(&type_name, Some(prior), prior_private, new_inputs_json)
+            .plan_and_apply(
+                &type_name,
+                Some(prior),
+                prior_private,
+                new_inputs_json,
+                provider_config,
+            )
             .await?;
         Ok(v0::UpdateResourceResponse {
             output_properties: outcome.outputs,
@@ -98,8 +111,12 @@ impl ResourceProvider for TfPluginProvider {
         let type_name = request.resource.type_.0.clone();
         let stored = private_state::decode(request.resource.private_state.map(|p| p.0))?;
         let prior_private = stored.provider;
+        // The stored inputs carry the provider configuration the resource
+        // was created with; destroy reuses it, update uses the new one.
+        let (prior_inputs, prior_provider_config) =
+            crate::provider_config::split(request.resource.input_properties.0)?;
         let prior = PriorState {
-            inputs: request.resource.input_properties.0,
+            inputs: prior_inputs,
             outputs: request.resource.output_properties.map(|op| op.0),
             state: stored.state,
         };
@@ -110,7 +127,13 @@ impl ResourceProvider for TfPluginProvider {
         // will drop the resource from state. The `private` bytes are
         // likewise discarded: the resource is gone.
         let _ = self
-            .plan_and_apply(&type_name, Some(prior), prior_private, b"null".to_vec())
+            .plan_and_apply(
+                &type_name,
+                Some(prior),
+                prior_private,
+                b"null".to_vec(),
+                prior_provider_config,
+            )
             .await?;
         Ok(v0::DestroyResourceResponse {})
     }
@@ -126,10 +149,18 @@ impl TfPluginProvider {
         prior: Option<PriorState>,
         prior_private: Vec<u8>,
         inputs_json: Vec<u8>,
+        provider_config: Value,
     ) -> Result<PlanApplyOutcome> {
         let client = ProviderClient::launch(&self.provider_exe).await?;
-        let result =
-            plan_and_apply_inner(&client, type_name, prior, prior_private, inputs_json).await;
+        let result = plan_and_apply_inner(
+            &client,
+            type_name,
+            prior,
+            prior_private,
+            inputs_json,
+            provider_config,
+        )
+        .await;
         client.shutdown().await?;
         result
     }
@@ -141,6 +172,7 @@ async fn plan_and_apply_inner(
     prior: Option<PriorState>,
     prior_private: Vec<u8>,
     inputs_json: Vec<u8>,
+    provider_config: Value,
 ) -> Result<PlanApplyOutcome> {
     // Schema is fetched once per adapter invocation. Both the
     // projection of `new_state` onto declared computed outputs and
@@ -163,11 +195,8 @@ async fn plan_and_apply_inner(
         serde_json::to_vec(&value).context("serialising completed inputs")?
     };
     let provider_config = {
-        let value = crate::complete::complete_block(
-            &schema.provider.block,
-            Value::Object(Map::new()),
-            "provider",
-        )?;
+        let value =
+            crate::complete::complete_block(&schema.provider.block, provider_config, "provider")?;
         serde_json::to_vec(&value).context("serialising provider configuration")?
     };
 

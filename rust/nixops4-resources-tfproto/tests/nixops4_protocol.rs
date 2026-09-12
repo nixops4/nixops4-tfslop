@@ -485,3 +485,41 @@ async fn destroy_fx_private_receives_prior_private_state() {
 
     client.close_wait().await.expect("close adapter");
 }
+
+// Provider configuration rides in the resource inputs under the
+// reserved `provider` attribute (see provider_config.rs). The fixture
+// echoes what ConfigureProvider received, so the output proves the
+// value made the trip and was not left in the resource config.
+#[tokio::test]
+async fn create_passes_inputs_provider_to_configure_provider() {
+    let Some(fixture) = fixture_path() else {
+        eprintln!("skipping: NIXOPS4_TFPROTO_FIXTURE not set");
+        return;
+    };
+
+    let mut client = ResourceProviderClient::new(ResourceProviderConfig {
+        provider_executable: ADAPTER.to_string(),
+        provider_args: vec!["run".to_string(), "--provider-exe".to_string(), fixture],
+    })
+    .await
+    .expect("spawn adapter");
+
+    let mut inputs = Map::new();
+    let mut provider = Map::new();
+    provider.insert("tag".to_string(), Value::String("configured".to_string()));
+    inputs.insert("provider".to_string(), Value::Object(provider));
+
+    let outcome = client
+        .create("fx_provider_echo", &inputs, true)
+        .await
+        .expect("create fx_provider_echo");
+
+    assert_eq!(
+        outcome.output_properties.get("value"),
+        Some(&Value::String("configured".to_string())),
+        "output_properties: {:?}",
+        outcome.output_properties
+    );
+
+    client.close_wait().await.expect("close adapter");
+}

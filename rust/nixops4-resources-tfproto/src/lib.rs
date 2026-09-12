@@ -16,6 +16,7 @@ pub mod prior_state;
 pub mod private_state;
 pub mod proposed;
 pub mod provider;
+pub mod provider_config;
 pub mod schema;
 pub mod sensitive_markers;
 pub mod tf_provider_client;
