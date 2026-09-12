@@ -40,6 +40,26 @@ let
 
   cfg = providerEval.config;
 
+  # The provider module: package in, resource types out. Adapter,
+  # executable and schema are given explicitly so the test neither
+  # builds nor materialises anything.
+  moduleEval = lib.evalModules {
+    modules = [
+      "${nixops4.outPath}/nix/provider/provider.nix"
+      self.modules.nixops4Provider.terraform
+      {
+        terraform = {
+          adapter = "/fake/adapter";
+          executable = "/fake/provider";
+          schema = fixtureSchema;
+        };
+      }
+      { options._module.args = lib.mkOption { internal = true; }; }
+    ];
+    specialArgs.resourceProviderSystem = throw "explicit settings should not consult the system";
+  };
+  moduleCfg = moduleEval.config;
+
   # Extract the `inputs` options declared for each fixture resource so
   # we can inspect the option types the translation emitted.
   fxStringInputOptions =
@@ -592,6 +612,26 @@ in
     };
   };
 
+  # modules.nixops4Provider.terraform
+
+  "test provider module yields the schema's resource types" = {
+    expr = builtins.attrNames moduleCfg.resourceTypes == builtins.attrNames cfg.resourceTypes;
+    expected = true;
+  };
+
+  "test provider module wires adapter and executable into every type" = {
+    expr = {
+      inherit (moduleCfg.resourceTypes.fx_string.provider) executable args;
+    };
+    expected = {
+      executable = "/fake/adapter";
+      args = [
+        "run"
+        "--provider-exe"
+        "/fake/provider"
+      ];
+    };
+  };
   # Provider configuration: every resource type takes `inputs.provider`,
   # typed from the provider block, optional as a whole.
 

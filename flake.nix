@@ -12,7 +12,13 @@
   outputs =
     inputs@{ self, flake-parts, ... }:
     flake-parts.lib.mkFlake { inherit inputs; } (
-      { lib, ... }:
+      {
+        config,
+        lib,
+        withSystem,
+        flake-parts-lib,
+        ...
+      }:
       {
         imports = [
           inputs.nix-cargo-integration.flakeModule
@@ -31,6 +37,13 @@
             packages.default = config.packages.nixops4-resources-tfproto-release;
             packages.fixture = pkgs.callPackage ./fixture/package.nix { };
           };
+
+        # A provider module that takes a Terraform provider package and
+        # does the rest; see nix/provider-module.nix.
+        flake.modules.nixops4Provider.terraform = flake-parts-lib.importApply ./nix/provider-module.nix {
+          inherit withSystem;
+          tfLib = config.flake.lib;
+        };
 
         flake.lib = import ./nix/lib/lib.nix {
           inherit lib;

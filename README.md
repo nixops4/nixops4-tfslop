@@ -108,3 +108,21 @@ Attributes left unset fall back to whatever the provider reads on its
 own, typically environment variables. There is deliberately no
 provider-wide default: configuration is data on the resource, and
 sharing it between resources is the expression's job.
+
+## Using a provider from nixpkgs
+
+`modules.nixops4Provider.terraform` turns a Terraform provider package
+into a nixops4 provider. Name the package; the binary path, the adapter
+for the system nixops4 runs on, and the schema (materialised from the
+binary) all have defaults, each overridable:
+
+```nix
+providers.scaleway = {
+  imports = [ inputs.nixops4-tfproto.modules.nixops4Provider.terraform ];
+  terraform.package = pkgs.terraform-providers.scaleway_scaleway;
+  # terraform.schema = lib.importJSON ./scaleway-schema.json;  # skip the IFD
+};
+```
+
+`lib.tfProviderToModule` and `lib.tfCommonSchemaToModule` remain for
+callers that want the function form.
