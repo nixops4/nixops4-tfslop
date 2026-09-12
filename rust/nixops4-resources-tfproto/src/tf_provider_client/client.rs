@@ -91,12 +91,13 @@ impl ProviderClient {
         // The provider SDK's logger (terraform-plugin-go, "sdk.*"
         // modules) reads its level from TF_LOG_SDK and falls back to
         // trace when that is unset, which is the CLI's job to set.
-        // We are the CLI here: default to errors only, and leave the
+        // We are the CLI here: default to warnings and errors, and leave the
         // variable alone when the user set it to debug a provider.
         // Tested against the Scaleway provider: unset gave ~630 trace
-        // lines per schema fetch, ERROR gives one go-plugin line.
+        // lines per schema fetch, WARN gives one go-plugin line. Warnings
+        // are kept: a provider warning is something the user wants to see.
         if std::env::var_os("TF_LOG_SDK").is_none() {
-            cmd.env("TF_LOG_SDK", "ERROR");
+            cmd.env("TF_LOG_SDK", "WARN");
         }
 
         let mut process = cmd
