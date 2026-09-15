@@ -12,4 +12,4 @@
 mod client;
 mod handshake;
 
-pub use client::ProviderClient;
+pub use client::{requires_replace_paths, ProviderClient};

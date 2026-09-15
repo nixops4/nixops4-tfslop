@@ -350,11 +350,6 @@ impl ProviderClient {
         config_json: Vec<u8>,
         prior_private: Vec<u8>,
     ) -> Result<tfplugin6::plan_resource_change::Response> {
-        // On a create the provider compares null against the config, so
-        // every ForceNew attribute shows up in `requires_replace`
-        // (terraform-plugin-sdk v2 does exactly that). Terraform core
-        // ignores the list when there is no prior object; so do we.
-        let is_create = prior_state_json == b"null";
         let req = tfplugin6::plan_resource_change::Request {
             type_name: type_name.to_string(),
             prior_state: Some(dv(prior_state_json)?),
@@ -374,9 +369,9 @@ impl ProviderClient {
             .await?;
         check_diagnostics(&response.diagnostics)?;
         check_deferred(response.deferred.as_ref(), "PlanResourceChange")?;
-        if !is_create {
-            check_requires_replace(&response.requires_replace)?;
-        }
+        // `requires_replace` is left in the response for the caller to read:
+        // what it means depends on the operation. See
+        // [`requires_replace_paths`].
         Ok(response)
     }
 
@@ -419,27 +414,20 @@ fn dv(json: Vec<u8>) -> Result<tfplugin6::DynamicValue> {
     crate::dynamic_value::from_json(json)
 }
 
-/// Bail when the provider signalled `requires_replace` on a Plan.
+/// The attribute paths the provider named in `requires_replace` on a Plan,
+/// as the user spells them.
 ///
-/// The provider is saying "this change can't be done in place —
-/// destroy and recreate." nixops4 has no state-machine concept for
-/// that; silently proceeding would produce a broken apply. Until
-/// nixops4 grows a way to accept the signal, refuse with a message
-/// naming the paths so the user can either destroy the resource
-/// themselves and re-apply, or change their config to avoid the
-/// replace.
-fn check_requires_replace(paths: &[tfplugin6::AttributePath]) -> Result<()> {
-    if paths.is_empty() {
-        return Ok(());
-    }
-    let formatted: Vec<String> = paths
+/// The provider is saying "this change can't be done in place — destroy and
+/// recreate". What that means is the caller's business: on an update it is
+/// the signal nixops4 replaces the resource on, and on a create it means
+/// nothing, because the provider compared the config against a null prior and
+/// terraform-plugin-sdk v2 names every ForceNew attribute when it does.
+/// Terraform core ignores the list on a create too.
+pub fn requires_replace_paths(paths: &[tfplugin6::AttributePath]) -> Vec<String> {
+    paths
         .iter()
         .map(|p| format_attribute_path(p).unwrap_or_else(|| "<empty>".to_string()))
-        .collect();
-    bail!(
-        "provider requires destroy+recreate for {}; nixops4 has no in-place replace, remove the resource and re-apply",
-        formatted.join(", ")
-    );
+        .collect()
 }
 
 /// Bail when the provider returned a `Deferred` field on a response.

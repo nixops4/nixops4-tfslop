@@ -9,13 +9,73 @@
 
 use base64::Engine as _;
 use nixops4_resource::schema::v0;
-use nixops4_resource_runner::{ResourceProviderClient, ResourceProviderConfig};
+use nixops4_resource_runner::{
+    ResourceProviderClient, ResourceProviderConfig, UpdateOutcome, UpdateResult,
+};
+
+/// The outcome of an update that was applied in place, for a test that
+/// expects nothing else. A `RequiresReplace` here is a failure of the test's
+/// premise, not of the assertion that follows it.
+#[track_caller]
+fn applied(outcome: UpdateResult) -> UpdateOutcome {
+    match outcome {
+        UpdateResult::Updated(outcome) => outcome,
+        UpdateResult::RequiresReplace { reasons } => {
+            panic!("expected an in-place update, got a requires-replace for {reasons:?}")
+        }
+    }
+}
 use serde_json::{Map, Value};
 
 const ADAPTER: &str = env!("CARGO_BIN_EXE_nixops4-resources-tfproto");
 
 fn fixture_path() -> Option<String> {
     std::env::var("NIXOPS4_TFPROTO_FIXTURE").ok()
+}
+
+/// A ForceNew attribute reaches nixops4 as the protocol's
+/// requires-replace outcome, not as an error: the adapter passes the
+/// provider's judgement on, and nixops4 is what destroys and creates.
+/// The fixture's `fx_needs_replace` plans a replacement for any change of
+/// `value`.
+#[tokio::test]
+async fn update_of_a_force_new_attribute_asks_for_a_replacement() {
+    let Some(fixture) = fixture_path() else {
+        eprintln!("skipping: NIXOPS4_TFPROTO_FIXTURE not set");
+        return;
+    };
+
+    let mut client = ResourceProviderClient::new(ResourceProviderConfig {
+        provider_executable: ADAPTER.to_string(),
+        provider_args: vec!["run".to_string(), "--provider-exe".to_string(), fixture],
+    })
+    .await
+    .expect("spawn adapter");
+
+    let mut previous_inputs = Map::new();
+    previous_inputs.insert("value".to_string(), Value::String("before".to_string()));
+    let mut new_inputs = Map::new();
+    new_inputs.insert("value".to_string(), Value::String("after".to_string()));
+
+    let outcome = client
+        .update(
+            "fx_needs_replace",
+            &new_inputs,
+            &previous_inputs,
+            &Map::new(),
+            None,
+        )
+        .await
+        .expect("a requires-replace is an outcome, not a failure");
+
+    assert_eq!(
+        outcome,
+        UpdateResult::RequiresReplace {
+            reasons: vec!["value".to_string()]
+        }
+    );
+
+    client.close_wait().await.expect("close adapter");
 }
 
 #[tokio::test]
@@ -83,6 +143,7 @@ async fn update_fx_string_via_nixops4_protocol() {
         )
         .await
         .expect("update fx_string");
+    let outcome = applied(outcome);
 
     assert!(
         outcome.output_properties.is_empty(),
@@ -424,6 +485,7 @@ async fn fx_private_round_trips_between_create_and_update() {
         )
         .await
         .expect("update fx_private (adapter must feed prior private_state back to Plan)");
+    let update_outcome = applied(update_outcome);
 
     let updated_b64 = update_outcome
         .private_state

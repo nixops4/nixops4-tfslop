@@ -2,7 +2,7 @@
 //! tfplugin gRPC provider.
 
 use anyhow::{Context, Result};
-use nixops4_resource::framework::ResourceProvider;
+use nixops4_resource::framework::{ResourceProvider, UpdateOutcome};
 use nixops4_resource::schema::v0;
 use serde_json::{Map, Value};
 
@@ -22,6 +22,28 @@ struct PriorState {
     outputs: Option<Map<String, Value>>,
     /// Complete state from the last Apply, when the adapter kept it.
     state: Option<Value>,
+}
+
+/// What a Plan came to.
+///
+/// A plan that names `requires_replace` paths says the change cannot be
+/// applied to the resource that exists. Nothing is applied then: the answer
+/// goes back to nixops4, which destroys the resource and creates it again.
+enum PlanOutcome {
+    Applied(PlanApplyOutcome),
+    RequiresReplace { reasons: Vec<String> },
+}
+
+/// What the caller wants done when a Plan names `requires_replace`.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum OnRequiresReplace {
+    /// Apply anyway. What a create does: the provider compared the config
+    /// against a null prior, so terraform-plugin-sdk v2 names every ForceNew
+    /// attribute, and the resource is being created rather than replaced.
+    Ignore,
+    /// Hand the paths back, so the caller can answer nixops4 with a
+    /// replacement rather than applying a change the provider refused.
+    Report,
 }
 
 /// Whole outcome of one Plan+Apply run: outputs projected onto the
@@ -53,9 +75,18 @@ impl ResourceProvider for TfPluginProvider {
         let type_name = request.type_.0.clone();
         let (inputs, provider_config) = crate::provider_config::split(request.input_properties.0)?;
         let inputs_json = properties_to_cty_json(inputs)?;
-        let outcome = self
-            .plan_and_apply(&type_name, None, Vec::new(), inputs_json, provider_config)
-            .await?;
+        let outcome = Self::require_applied(
+            self.plan_and_apply(
+                &type_name,
+                None,
+                Vec::new(),
+                inputs_json,
+                provider_config,
+                OnRequiresReplace::Ignore,
+            )
+            .await?,
+            &type_name,
+        )?;
         Ok(v0::CreateResourceResponse {
             output_properties: outcome.outputs,
             private_state: private_state::encode(private_state::Private {
@@ -66,10 +97,7 @@ impl ResourceProvider for TfPluginProvider {
         })
     }
 
-    async fn update(
-        &self,
-        request: v0::UpdateResourceRequest,
-    ) -> Result<v0::UpdateResourceResponse> {
+    async fn update(&self, request: v0::UpdateResourceRequest) -> Result<UpdateOutcome> {
         let type_name = request.resource.type_.0.clone();
         let (new_inputs, provider_config) =
             crate::provider_config::split(request.input_properties.0)?;
@@ -92,16 +120,28 @@ impl ResourceProvider for TfPluginProvider {
                 prior_private,
                 new_inputs_json,
                 provider_config,
+                OnRequiresReplace::Report,
             )
             .await?;
-        Ok(v0::UpdateResourceResponse {
-            output_properties: outcome.outputs,
+        let applied = match outcome {
+            // The provider's ForceNew, passed on as it is: nixops4 destroys
+            // the resource and creates it again, in the order the resource's
+            // `replaceOrder` asks for.
+            PlanOutcome::RequiresReplace { reasons } => {
+                return Ok(UpdateOutcome::RequiresReplace(
+                    v0::RequiresReplaceResponse { reasons },
+                ))
+            }
+            PlanOutcome::Applied(applied) => applied,
+        };
+        Ok(UpdateOutcome::Updated(v0::UpdateResourceResponse {
+            output_properties: applied.outputs,
             private_state: private_state::encode(private_state::Private {
-                provider: outcome.apply_private,
-                state: Some(outcome.new_state),
+                provider: applied.apply_private,
+                state: Some(applied.new_state),
             })
             .map(v0::PrivateState),
-        })
+        }))
     }
 
     async fn destroy(
@@ -126,15 +166,18 @@ impl ResourceProvider for TfPluginProvider {
         // the provider might have returned are discarded — nixops4
         // will drop the resource from state. The `private` bytes are
         // likewise discarded: the resource is gone.
-        let _ = self
-            .plan_and_apply(
+        let _ = Self::require_applied(
+            self.plan_and_apply(
                 &type_name,
                 Some(prior),
                 prior_private,
                 b"null".to_vec(),
                 prior_provider_config,
+                OnRequiresReplace::Ignore,
             )
-            .await?;
+            .await?,
+            &type_name,
+        )?;
         Ok(v0::DestroyResourceResponse {})
     }
 }
@@ -150,7 +193,8 @@ impl TfPluginProvider {
         prior_private: Vec<u8>,
         inputs_json: Vec<u8>,
         provider_config: Value,
-    ) -> Result<PlanApplyOutcome> {
+        on_requires_replace: OnRequiresReplace,
+    ) -> Result<PlanOutcome> {
         let client = ProviderClient::launch(&self.provider_exe).await?;
         let result = plan_and_apply_inner(
             &client,
@@ -159,10 +203,27 @@ impl TfPluginProvider {
             prior_private,
             inputs_json,
             provider_config,
+            on_requires_replace,
         )
         .await;
         client.shutdown().await?;
         result
+    }
+
+    /// The outcome of a Plan that cannot be answered with a replacement.
+    ///
+    /// A create is planned against a null prior and a destroy is planned to
+    /// null, so neither can come back asking for one; a provider that does it
+    /// anyway is saying something this adapter has no reading for.
+    fn require_applied(outcome: PlanOutcome, type_name: &str) -> Result<PlanApplyOutcome> {
+        match outcome {
+            PlanOutcome::Applied(applied) => Ok(applied),
+            PlanOutcome::RequiresReplace { reasons } => anyhow::bail!(
+                "provider asked for {} to be replaced ({}) where a replacement is not an answer",
+                type_name,
+                reasons.join(", ")
+            ),
+        }
     }
 }
 
@@ -173,7 +234,8 @@ async fn plan_and_apply_inner(
     prior_private: Vec<u8>,
     inputs_json: Vec<u8>,
     provider_config: Value,
-) -> Result<PlanApplyOutcome> {
+    on_requires_replace: OnRequiresReplace,
+) -> Result<PlanOutcome> {
     // Schema is fetched once per adapter invocation. Both the
     // projection of `new_state` onto declared computed outputs and
     // the stripping of write_only attributes from `prior_state` need
@@ -257,6 +319,15 @@ async fn plan_and_apply_inner(
             prior_private,
         )
         .await?;
+    // Before the Apply: the resource has to be untouched when the adapter
+    // reports that it needs replacing, because what nixops4 destroys next is
+    // the resource as this request described it.
+    if on_requires_replace == OnRequiresReplace::Report && !plan.requires_replace.is_empty() {
+        return Ok(PlanOutcome::RequiresReplace {
+            reasons: crate::tf_provider_client::requires_replace_paths(&plan.requires_replace),
+        });
+    }
+
     let planned_state = plan
         .planned_state
         .context("provider returned no planned_state")?;
@@ -277,11 +348,11 @@ async fn plan_and_apply_inner(
     let new_state_json = serde_json::to_vec(&new_state_value).context("serialising new_state")?;
     let outputs = project_new_state(&schema, type_name, &new_state_json)?;
     let outputs = wrap_sensitive_outputs(&schema, type_name, outputs)?;
-    Ok(PlanApplyOutcome {
+    Ok(PlanOutcome::Applied(PlanApplyOutcome {
         new_state: new_state_value,
         outputs: v0::OutputProperties(outputs),
         apply_private: apply.private,
-    })
+    }))
 }
 
 fn properties_to_cty_json(props: Map<String, Value>) -> Result<Vec<u8>> {

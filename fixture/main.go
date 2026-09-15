@@ -140,9 +140,14 @@ func (p *fixtureProvider) GetProviderSchema(context.Context, *tfprotov6.GetProvi
 			},
 			// Plan handler returns `requires_replace` for the `value`
 			// attribute. The provider is saying "this change can't
-			// be done in place — destroy and recreate." nixops4 has
-			// no such concept today; the adapter rejects with a
-			// clear message rather than silently applying.
+			// be done in place — destroy and recreate." The adapter
+			// passes that on as the resource protocol's
+			// requires-replace outcome, and nixops4 destroys the
+			// resource and creates it again.
+			//
+			// `id` is computed, so a dependent can read an output of
+			// this resource and an itest can see that it is the new
+			// resource's output that reaches it.
 			"fx_needs_replace": {
 				Version: 0,
 				Block: &tfprotov6.SchemaBlock{
@@ -152,6 +157,13 @@ func (p *fixtureProvider) GetProviderSchema(context.Context, *tfprotov6.GetProvi
 							Type:            tftypes.String,
 							Required:        true,
 							Description:     "Provider will demand replace on any change.",
+							DescriptionKind: tfprotov6.StringKindPlain,
+						},
+						{
+							Name:            "id",
+							Type:            tftypes.String,
+							Computed:        true,
+							Description:     "Provider-issued identifier, derived from value.",
 							DescriptionKind: tfprotov6.StringKindPlain,
 						},
 					},
@@ -882,10 +894,23 @@ func (p *fixtureProvider) PlanResourceChange(_ context.Context, req *tfprotov6.P
 	if req.TypeName == "fx_hang_on_plan" {
 		select {}
 	}
-	// fx_needs_replace: return requires_replace naming `value`.
+	// fx_needs_replace: return requires_replace naming `value`. The
+	// list is filled in on a create too — terraform-plugin-sdk v2 does
+	// the same, because the config differs from a null prior — and
+	// Terraform core and the adapter both ignore it there.
 	if req.TypeName == "fx_needs_replace" {
+		planned, err := planFxNeedsReplace(req.ProposedNewState)
+		if err != nil {
+			return &tfprotov6.PlanResourceChangeResponse{
+				Diagnostics: []*tfprotov6.Diagnostic{{
+					Severity: tfprotov6.DiagnosticSeverityError,
+					Summary:  "planFxNeedsReplace",
+					Detail:   err.Error(),
+				}},
+			}, nil
+		}
 		return &tfprotov6.PlanResourceChangeResponse{
-			PlannedState: req.ProposedNewState,
+			PlannedState: planned,
 			RequiresReplace: []*tftypes.AttributePath{
 				tftypes.NewAttributePath().WithAttributeName("value"),
 			},
@@ -1065,6 +1090,29 @@ func priorStateHasValue(pns *tfprotov6.DynamicValue, key string) bool {
 // planFxComputed injects a synthetic `id` into the planned state. On
 // destroy the proposed state is a JSON null; leave it untouched so the
 // existing destroy path (echo null → new_state null) still works.
+// planFxNeedsReplace fills in the computed `id` so a dependent has an
+// output to read, and so the itest can tell the new resource's output
+// from the one it replaced.
+func planFxNeedsReplace(pns *tfprotov6.DynamicValue) (*tfprotov6.DynamicValue, error) {
+	if pns == nil || len(pns.JSON) == 0 {
+		return pns, nil
+	}
+	var m map[string]any
+	if err := json.Unmarshal(pns.JSON, &m); err != nil {
+		return nil, err
+	}
+	if m == nil {
+		return pns, nil
+	}
+	value, _ := m["value"].(string)
+	m["id"] = "id-for-" + value
+	out, err := json.Marshal(m)
+	if err != nil {
+		return nil, err
+	}
+	return &tfprotov6.DynamicValue{JSON: out}, nil
+}
+
 func planFxComputed(pns *tfprotov6.DynamicValue) (*tfprotov6.DynamicValue, error) {
 	if pns == nil || len(pns.JSON) == 0 {
 		return pns, nil

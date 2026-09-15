@@ -142,6 +142,54 @@ runCommand "itest-nixops4-with-tfproto"
 
       rm -f provider-state.json
     )
+    h1 REPLACEMENT
+    (
+      set -x
+      echo "=== A ForceNew attribute drives a replacement through nixops4 ==="
+
+      nixops4 apply -v replaceDeployment --show-trace
+      test -f replace-state.json
+
+      # How many events the log holds, so the assertions below read
+      # only what the second apply appended.
+      before=$(jq -s 'length' replace-state.json)
+
+      # `value` is ForceNew in the fixture's schema, so the provider
+      # answers the plan with requires_replace and the adapter reports
+      # it rather than applying. nixops4 destroys the resource and
+      # creates it again.
+      sed -i 's/replaceValue = "before";/replaceValue = "after";/' flake.nix
+      nixops4 apply -v replaceDeployment --show-trace 2> replace.stderr
+
+      grep -F 'The following resources were replaced:' replace.stderr
+      grep -F '  - resource replaceDeployment.thing' replace.stderr
+
+      # The destroy of the old resource, the create of the new one, and
+      # then the dependent recording what it read.
+      events=$(jq -sc "[.[$before:][] | .meta.event // empty]" replace-state.json)
+      [[ '["destroy","create","update"]' == "$events" ]] || {
+        echo "FAIL: unexpected state events for the replacement: $events"
+        cat replace-state.json
+        exit 1
+      }
+
+      # The new resource's output is what reached the dependent: the
+      # provider derives `id` from `value`, which is what changed.
+      jq -es '
+        [.[] | .patch[]?
+               | select((.path | endswith("/witness/input_properties/initialize_with"))
+                        and .value == "id-for-after")]
+          | length > 0
+      ' replace-state.json | grep -q true || {
+        echo "FAIL: the dependent did not get the new resource's output"
+        cat replace-state.json
+        exit 1
+      }
+
+      mv replace.stderr $out/logs/replace.stderr
+      rm -f replace-state.json
+    )
+
     h1 SENSITIVE ROUND-TRIP
     (
       set -x

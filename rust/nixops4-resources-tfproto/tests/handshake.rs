@@ -5,7 +5,10 @@
 //! When running under plain `cargo test` outside that setup, the test
 //! is skipped rather than failing.
 
-use nixops4_resources_tfproto::{schema::ProviderSchema, tf_provider_client::ProviderClient};
+use nixops4_resources_tfproto::{
+    schema::ProviderSchema,
+    tf_provider_client::{requires_replace_paths, ProviderClient},
+};
 use std::os::unix::process::ExitStatusExt;
 use std::time::Duration;
 
@@ -149,9 +152,10 @@ async fn update_string_via_plan_apply() {
 }
 
 // #41: `requires_replace` on Plan means "this change can't be done
-// in place — destroy and recreate." Nixops4 has no state-machine
-// for that yet, so silently proceeding would produce a broken plan.
-// The adapter must reject with a clear message naming the paths.
+// in place — destroy and recreate." The client hands the paths back
+// as data rather than refusing: what the signal means depends on the
+// operation, and on an update it is what the adapter answers nixops4
+// with so that nixops4 replaces the resource.
 #[tokio::test]
 async fn plan_requires_replace_surfaces_paths() {
     let Some(path) = fixture_path() else {
@@ -165,8 +169,7 @@ async fn plan_requires_replace_surfaces_paths() {
         .expect("configure fixture");
 
     // The fixture Plan always sets requires_replace. With a prior
-    // state present that is a real "cannot update in place" signal,
-    // which the adapter must refuse.
+    // state present that is a real "cannot update in place" signal.
     let prior = br#"{"value":"before"}"#.to_vec();
     let inputs = br#"{"value":"anything"}"#.to_vec();
     let result = client
@@ -180,17 +183,11 @@ async fn plan_requires_replace_surfaces_paths() {
         .await;
     let _ = client.shutdown().await;
 
-    let err = result.expect_err("Plan with requires_replace must surface as an error");
-    let chain = format!("{err:#}");
-    assert!(
-        chain.contains("requires_replace")
-            || chain.contains("destroy")
-            || chain.contains("replace"),
-        "error should identify a requires-replace signal; got: {chain}"
-    );
-    assert!(
-        chain.contains("value"),
-        "error should name the attribute path; got: {chain}"
+    let response = result.expect("Plan with requires_replace is not a failure");
+    assert_eq!(
+        requires_replace_paths(&response.requires_replace),
+        vec!["value".to_string()],
+        "the path the provider named must reach the caller, to be reported to the user"
     );
 }
 

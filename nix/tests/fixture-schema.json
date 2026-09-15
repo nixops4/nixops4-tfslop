@@ -272,6 +272,13 @@
     "fx_needs_replace": {
       "block": {
         "attributes": {
+          "id": {
+            "type": "\"string\"",
+            "required": false,
+            "optional": false,
+            "computed": true,
+            "description": "Provider-issued identifier, derived from value."
+          },
           "value": {
             "type": "\"string\"",
             "required": true,

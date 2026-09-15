@@ -131,6 +131,35 @@
                 };
               };
 
+            # A ForceNew attribute, end to end. The fixture's
+            # `fx_needs_replace` answers any change of `value` with
+            # `requires_replace`, the adapter passes that on as the
+            # resource protocol's requires-replace outcome, and nixops4
+            # destroys the resource and creates it again.
+            members.replaceDeployment =
+              { members, ... }:
+              let
+                replaceValue = "before";
+              in
+              {
+                members.state = {
+                  type = providers.local.state_file;
+                  inputs.name = "replace-state.json";
+                };
+                members.thing = {
+                  type = providers.tfFixture.fx_needs_replace;
+                  state = members.state;
+                  inputs.value = replaceValue;
+                };
+                # Created after `thing`, so the creation index the
+                # replacement gets has something to count past.
+                members.witness = {
+                  type = providers.local.memo;
+                  state = members.state;
+                  inputs.initialize_with = members.thing.outputs.id;
+                };
+              };
+
             members.sensitiveDeployment =
               { members, ... }:
               let
