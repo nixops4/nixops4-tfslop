@@ -213,11 +213,11 @@
         ]
       },
       "locked": {
-        "lastModified": 1778716662,
-        "narHash": "sha256-m1Yf0wZ8j1OHjTc2UwHwyQRSnNeSgLJOd7q5Y45hzi4=",
+        "lastModified": 1782949081,
+        "narHash": "sha256-vp6Y/Grm98ESt6ceOkWiHWyZRDV3J1RID4w+6NWK9yA=",
         "owner": "hercules-ci",
         "repo": "flake-parts",
-        "rev": "f7c1a2d347e4c52d5fb8d10cb4d94b5884e546fb",
+        "rev": "17c9d6cdfc60c64f4ee8d306f9bc0b4ccb51481e",
         "type": "github"
       },
       "original": {
@@ -263,11 +263,6 @@
           "nix-bindings-rust",
           "nix"
         ],
-        "gitignore": [
-          "nixops4",
-          "nix-bindings-rust",
-          "nix"
-        ],
         "nixpkgs": [
           "nixops4",
           "nix-bindings-rust",
@@ -276,11 +271,11 @@
         ]
       },
       "locked": {
-        "lastModified": 1781733627,
-        "narHash": "sha256-U3yTuGBnmXvXoQI3qkpfEDsn9RovQPAjN7ndRco+3u0=",
+        "lastModified": 1783008725,
+        "narHash": "sha256-jGiy6+sxjNWXSjp25uoJuNfyH9zBK1PEDY0lVoL4ibQ=",
         "owner": "cachix",
         "repo": "git-hooks.nix",
-        "rev": "3bbec39bc90eadfa031e6f3b77272f3f60803e39",
+        "rev": "bca82caa46d5ec0f5d422c61fb1e30bc51313cbe",
         "type": "github"
       },
       "original": {
@@ -364,18 +359,17 @@
         ]
       },
       "locked": {
-        "lastModified": 1784324321,
-        "narHash": "sha256-EkHl7NGYeZneGFMPBZtbgPeRlNhmoKNzIV5novMkmsU=",
-        "ref": "primop-generalize",
-        "rev": "d599c7d9d0a59548f50ded46cf41e46e01acd19c",
-        "revCount": 332,
-        "type": "git",
-        "url": "https://scratch.notatio.nl/botbot/nix-bindings-rust.git"
+        "lastModified": 1789467335,
+        "narHash": "sha256-vD0dXRnkb46G43IsvMqWJ856yMq9gM7V3GG9996n5es=",
+        "owner": "nixops4",
+        "repo": "nix-bindings-rust",
+        "rev": "60ed04701973ba3373e64d210c8d78e96582cbfc",
+        "type": "github"
       },
       "original": {
-        "ref": "primop-generalize",
-        "type": "git",
-        "url": "https://scratch.notatio.nl/botbot/nix-bindings-rust.git"
+        "owner": "nixops4",
+        "repo": "nix-bindings-rust",
+        "type": "github"
       }
     },
     "nix-cargo-integration": {
@@ -445,11 +439,11 @@
         "nixpkgs-regression": "nixpkgs-regression_2"
       },
       "locked": {
-        "lastModified": 1783030128,
-        "narHash": "sha256-WfRmwMYdnzwhMrbAy8dGIshMUd/u2UzyiyZrhLKDZig=",
+        "lastModified": 1784913946,
+        "narHash": "sha256-ThcOJQuo78GbVl9bdj/1X40fTCYSU5PcZkqktA8rVh8=",
         "owner": "NixOS",
         "repo": "nix",
-        "rev": "b41781ed09cc718773b19c04b322601e2c00db1a",
+        "rev": "731e197c4f1ae09815bcd968571f09057c450609",
         "type": "github"
       },
       "original": {
@@ -467,17 +461,17 @@
         "nixpkgs": "nixpkgs"
       },
       "locked": {
-        "lastModified": 1784881614,
-        "narHash": "sha256-Pm8JAxjUOuegxzZFdgPb50PVjRKigH3CS/ExNyPRM/s=",
+        "lastModified": 1789468284,
+        "narHash": "sha256-QbIokMDB2mJ8e9thelhB7Ju5jhRc6fCH5St+Kaq+DmM=",
         "ref": "for-tfproto",
-        "rev": "aaf1af45b10688dd6e02afdc41b6a7b87182f47f",
-        "revCount": 664,
+        "rev": "b4c48fe158559dae9b7c158d712bfa1f88727996",
+        "revCount": 708,
         "type": "git",
         "url": "https://scratch.notatio.nl/botbot/nixops4"
       },
       "original": {
         "ref": "for-tfproto",
-        "rev": "aaf1af45b10688dd6e02afdc41b6a7b87182f47f",
+        "rev": "b4c48fe158559dae9b7c158d712bfa1f88727996",
         "type": "git",
         "url": "https://scratch.notatio.nl/botbot/nixops4"
       }
