@@ -461,17 +461,17 @@
         "nixpkgs": "nixpkgs"
       },
       "locked": {
-        "lastModified": 1789497634,
-        "narHash": "sha256-Fr69dfAU+jc8KRAFE35h07SwLLioHg/AKd5YomQ5kkw=",
+        "lastModified": 1789499245,
+        "narHash": "sha256-AP5fw+hwhpcxKvOoqsAwCxgSW69m35EledqKGTdi0zY=",
         "ref": "for-tfproto",
-        "rev": "b5c5df24b39d7a63159009e439f24d6f648c73ee",
-        "revCount": 731,
+        "rev": "b706d0aa055c67e9cd562a180a9446816b3edd4b",
+        "revCount": 734,
         "type": "git",
         "url": "https://scratch.notatio.nl/botbot/nixops4"
       },
       "original": {
         "ref": "for-tfproto",
-        "rev": "b5c5df24b39d7a63159009e439f24d6f648c73ee",
+        "rev": "b706d0aa055c67e9cd562a180a9446816b3edd4b",
         "type": "git",
         "url": "https://scratch.notatio.nl/botbot/nixops4"
       }
