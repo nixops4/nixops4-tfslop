@@ -5,7 +5,7 @@
     flake-parts.url = "github:hercules-ci/flake-parts";
     nix-cargo-integration.url = "github:yusdacra/nix-cargo-integration";
     nix-cargo-integration.inputs.nixpkgs.follows = "nixpkgs";
-    nixops4.url = "git+https://scratch.notatio.nl/botbot/nixops4?ref=for-tfproto&rev=aa1e51af46b01affadf8d29de03b4b9710a19ec2";
+    nixops4.url = "git+https://scratch.notatio.nl/botbot/nixops4?ref=for-tfproto&rev=2024778e02bd6511a3b72a3ba83639aa8c20f9a4";
     nixpkgs.follows = "nixops4/nixpkgs";
   };
 
