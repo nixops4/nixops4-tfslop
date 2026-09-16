@@ -156,6 +156,10 @@
                 members.witness = {
                   type = providers.local.memo;
                   state = members.state;
+                  # The witness has to follow the replaced resource's new id,
+                  # and `memo` declares `initialize_with` create-only, which
+                  # would keep it from even looking. Turned off here.
+                  createOnly.initialize_with = false;
                   inputs.initialize_with = members.thing.outputs.id;
                 };
               };
