@@ -7,6 +7,8 @@ This repo is vibe-coded, and has seen limited testing.
 This will be thoroughly reviewed and deslopped, with confirmed progress merged
 in a separate repo (`nixops4/nixops4-tfproto`, TBD).
 
+You probably need an accompanying [nixops4 tfslop branch](https://github.com/nixops4/nixops4/branches/all?query=tfslop&lastTab=overview) that may or may not be complete and/or functional.
+
 A [NixOps4](https://nixops.dev/) resource-provider adapter for the tfplugin
 gRPC protocol. Lets NixOps4 drive resources through existing providers built
 for [Terraform](https://www.terraform.io/) and
