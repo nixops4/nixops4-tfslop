@@ -1,6 +1,11 @@
-# nixops4-tfproto
+# nixops4-tfslop / nixops4-tfproto prototype
 
 **Status:** alpha, active development. Interfaces will change.
+
+This repo is vibe-coded, and has seen limited testing.
+
+This will be thoroughly reviewed and deslopped, with confirmed progress merged
+in a separate repo (`nixops4/nixops4-tfproto`, TBD).
 
 A [NixOps4](https://nixops.dev/) resource-provider adapter for the tfplugin
 gRPC protocol. Lets NixOps4 drive resources through existing providers built
